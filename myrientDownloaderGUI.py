@@ -67,6 +67,7 @@ class MyApp(QWidget):
 
         # Create a list for results
         self.result_list = QListWidget(self)
+        self.result_list.addItems(self.iso_list)  # Add this line to populate the list when the script starts
         vbox.addWidget(self.result_list)
 
         # Create a dropdown menu for selecting the operation
