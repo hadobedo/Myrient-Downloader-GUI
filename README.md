@@ -3,7 +3,7 @@ installation and usage:
 2. `pip install -r requirements.txt`
 3. `./myrientDownloaderGUI.py`
 
-if you're on a linux distro like arch that 'manages' python you can install requirements like so:
+if you're on a linux distro like arch whose python environment is externally managed you can install requirements like so:
 `sudo pacman -S python-requests python-beautifulsoup4 python-pyqt5 python-tqdm`
 
 todo:
