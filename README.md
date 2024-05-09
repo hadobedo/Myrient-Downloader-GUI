@@ -1,4 +1,4 @@
-![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/5c5b490a-4859-4822-a432-affd89acfe62)
+![Screenshot_20240509_020526](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/33cbef79-ceb3-47b2-9707-79580b1cf9db)
 
 installation and usage:
 1. `git clone https://github.com/hadobedo/myrientgrabber-ps3/ && cd myrientgrabber-ps3/`
