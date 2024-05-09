@@ -3,9 +3,9 @@ installation and usage:
 2. `pip install -r requirements.txt`
 3. `./myrientDownloaderGUI.py`
 
-if you're on a linux distro like arch that manages python on its own via pacman, install requirements with the following command:
+if you're on a linux distro like arch that 'manages' python you can install requirements like so:
 `sudo pacman -S python-requests python-beautifulsoup4 python-pyqt5 python-tqdm`
 
 todo:
-- windows support (settings button w/ support for setting custom `PS3Dec`, `splitps3iso` binary paths)
+- proper windows support (settings button w/ support for setting custom `PS3Dec`, `splitps3iso` binary paths)
 - better output
