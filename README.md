@@ -12,7 +12,4 @@ todo:
 
 screenshots:
 
-<img src="https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/33cbef79-ceb3-47b2-9707-79580b1cf9db" width="400" height="750">
-
-
-
+<img src="https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/86aec050-7dcc-4dfa-b785-3f262187b4eb" width="400" height="750">
