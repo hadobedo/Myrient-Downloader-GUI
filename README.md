@@ -30,7 +30,7 @@ todo:
 - multithreading
 
 screenshots:
-![Screenshot_20240511_032158](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/331a9297-252c-4125-99e8-0dc5c589cc62)
+![Screenshot_20240512_045047](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/68b227d3-67b9-49a3-a47e-7606217e0964)
 ![Screenshot_20240511_032153](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/a2be69ad-424f-45da-a6b3-db06519d65a4)
 
 
