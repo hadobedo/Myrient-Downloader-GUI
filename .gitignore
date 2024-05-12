@@ -1,0 +1,5 @@
+# ignore softwarelist.json
+softwarelist.json
+
+# ignore .vscode
+.vscode/

@@ -10,21 +10,54 @@ import tarfile
 import shutil
 import glob
 import multiprocessing
+import threading
+import urllib
+import json
+import datetime
+import time
+import aiohttp, asyncio
+from tqdm import tqdm
 from urllib.parse import unquote
 from bs4 import BeautifulSoup
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, QFileDialog, QMessageBox, QDialog, QHBoxLayout
-from PyQt5.QtCore import QSettings
-from tqdm import tqdm
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, QFileDialog, QMessageBox, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar
+from PyQt5.QtCore import *
+from PyQt5.QtGui import QTextCursor
+
+class GetISOListThread(QThread):
+    signal = pyqtSignal('PyQt_PyObject')
+
+    def __init__(self):
+        QThread.__init__(self)
+
+    def run(self):
+        iso_list = []
+        if os.path.exists('softwarelist.json'):
+            with open('softwarelist.json', 'r') as file:
+                data = json.load(file)
+                iso_list = data['softwarelist']
+        
+        if not iso_list:
+            url = "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/"
+            response = requests.get(url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            iso_list = [unquote(link.get('href')) for link in soup.find_all('a') if link.get('href').endswith('.zip')]
+            data = {'softwarelist': iso_list}
+            with open('softwarelist.json', 'w') as file:
+                json.dump(data, file)
+
+        self.signal.emit(iso_list)
 
 class OutputWindow(QTextEdit):
     def __init__(self, *args, **kwargs):
         super(OutputWindow, self).__init__(*args, **kwargs)
-        sys.stdout = self
-        sys.stderr = self
+        # sys.stdout = self
         self.setReadOnly(True)
 
     def write(self, text):
-        self.append('<pre>' + text + '</pre>')
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(text)
+        self.setTextCursor(cursor)
         QApplication.processEvents()
 
     def flush(self):
@@ -40,23 +73,118 @@ def run_command(command, output_window):
         process.stdin.flush()
         
     for line in iter(process.stdout.readline, b''):
-        output_window.append('<pre>' + line.decode() + '</pre>')
+        # Strip newline characters from the end of the line before appending
+        output_window.append(line.decode().rstrip('\n'))
         QApplication.processEvents()
     process.stdout.close()
     return_code = process.wait()
     if return_code:
         raise subprocess.CalledProcessError(return_code, command)
 
-# Function to download a file over HTTPS with progress bar
-def download_file(url, filename):
-    response = requests.get(url, stream=True)
-    total_size = int(response.headers.get('content-length', 0))
-    progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True)
-    with open(filename, 'wb') as file:
-        for chunk in response.iter_content(chunk_size=8192):
-            file.write(chunk)
-            progress_bar.update(len(chunk))
-    progress_bar.close()
+# Function to unzip a file with progress
+def unzip_file(zip_path, output_path, output_window):
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        total_files = len(zip_ref.infolist())
+        for i, file in enumerate(zip_ref.infolist(), start=1):
+            # Show a rotating ellipsis
+            ellipsis = '.' * (i % 4)
+            output_window.write(f"Extracting {file.filename} (program may look frozen, please wait!)")
+            zip_ref.extract(file, output_path)
+            QApplication.processEvents()
+
+class DownloadThread(QThread):
+    progress_signal = pyqtSignal(int)
+    speed_signal = pyqtSignal(str)
+    eta_signal = pyqtSignal(str)
+    download_complete_signal = pyqtSignal()
+
+    def __init__(self, url, filename, retries=10):
+        QThread.__init__(self)
+        self.url = url
+        self.filename = filename
+        self.retries = retries
+        self.existing_file_size = 0  # Initialize existing_file_size to 0
+        self.start_time = None
+        self.current_session_downloaded = 0  # Initialize current_session_downloaded to 0
+
+    async def download(self):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+        }
+
+        for i in range(self.retries):
+            try:
+                # If the file already exists, get its size and set the Range header
+                if os.path.exists(self.filename):
+                    self.existing_file_size = os.path.getsize(self.filename)
+                    headers['Range'] = f'bytes={self.existing_file_size}-'
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(self.url, headers=headers) as response:
+                        if response.status not in (200, 206):  # 200 = OK, 206 = Partial Content
+                            raise aiohttp.ClientPayloadError()
+
+                        # Get the total file size from the Content-Range header
+                        if 'content-range' in response.headers:
+                            total_size = int(response.headers['content-range'].split('/')[-1])
+                        else:
+                            total_size = int(response.headers.get('content-length'))
+
+                        # Open the file in append mode, and write each chunk to the file
+                        with open(self.filename, 'ab') as file:
+                            self.start_time = time.time()
+                            while True:
+                                chunk = await response.content.read(8192)
+                                if not chunk:
+                                    break
+                                file.write(chunk)
+                                self.existing_file_size += len(chunk)
+                                self.current_session_downloaded += len(chunk)  # Update the current_session_downloaded
+                                self.progress_signal.emit(int((self.existing_file_size / total_size) * 100))  # Emit the progress signal
+
+                                # Calculate speed and ETA
+                                elapsed_time = time.time() - self.start_time
+                                speed = self.current_session_downloaded / elapsed_time  # Calculate speed based on current session download
+                                remaining_bytes = total_size - self.existing_file_size
+                                eta = remaining_bytes / speed if speed > 0 else 0
+
+                                # Convert speed to appropriate units
+                                if speed > 1024**2:
+                                    speed_str = f"{speed / (1024**2):.2f} MB/s"
+                                else:
+                                    speed_str = f"{speed / 1024:.2f} KB/s"
+
+                                # Convert ETA to appropriate units
+                                if eta >= 60:
+                                    minutes, seconds = divmod(int(eta), 60)
+                                    eta_str = f"{minutes} minutes {seconds} seconds remaining"
+                                else:
+                                    eta_str = f"{eta:.2f} seconds remaining"
+
+                                # Emit the speed and ETA signals
+                                self.speed_signal.emit(speed_str)
+                                self.eta_signal.emit(eta_str)
+
+                # If the download was successful, break the loop
+                break
+            except aiohttp.ClientPayloadError:
+                self.output_window.append(f"Download interrupted. Retrying ({i+1}/{self.retries})...")
+                if i == self.retries - 1:  # If this was the last retry
+                    raise  # Re-raise the exception
+            except asyncio.TimeoutError:
+                self.output_window.append(f"Download interrupted. Retrying ({i+1}/{self.retries})...")
+                if i == self.retries - 1:  # If this was the last retry
+                    raise  # Re-raise the exception
+
+    def run(self):
+        asyncio.run(self.download())
+        self.download_complete_signal.emit()
+
+def download_file(self, url, filename):
+    self.progress_bar.reset()  # Reset the progress bar to 0
+    self.download_thread = DownloadThread(url, filename)
+    self.download_thread.start()
+
 
 
 class GUIDownloader(QWidget):
@@ -93,13 +221,278 @@ class GUIDownloader(QWidget):
             # If not, open the settings dialog
             self.open_settings()
 
+        self.iso_list = ['Loading from https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/...']
+
         # Get list of ISOs from the HTTPS directory
-        response = requests.get("https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/")
-        soup = BeautifulSoup(response.text, 'html.parser')
-        self.iso_list = [unquote(link.get('href')) for link in soup.find_all('a') if link.get('href').endswith('.zip')]
+        self.get_iso_list_thread = GetISOListThread()
+        self.get_iso_list_thread.signal.connect(self.set_iso_list)
+        self.get_iso_list_thread.start()
 
         self.initUI()
 
+    def initUI(self):
+        vbox = QVBoxLayout()
+
+        # Add a header for the software list
+        iso_list_header = QLabel('Software')
+        vbox.addWidget(iso_list_header)
+
+        # Create a search box
+        self.search_box = QLineEdit(self)
+        self.search_box.setPlaceholderText('Search...')
+        self.search_box.textChanged.connect(self.update_results)
+        vbox.addWidget(self.search_box)
+
+        # Create a list for results (software list)
+        self.result_list = QListWidget(self)
+        self.result_list.setSelectionMode(QAbstractItemView.MultiSelection)  # Allow multiple items to be selected
+        self.result_list.addItems(self.iso_list)
+        self.result_list.itemSelectionChanged.connect(self.update_add_to_queue_button)  # Connect the itemSelectionChanged signal
+        vbox.addWidget(self.result_list)
+
+        # Create a horizontal box layout
+        hbox = QHBoxLayout()
+
+        # Create a button to add to queue
+        self.add_to_queue_button = QPushButton('Add to Queue', self)
+        self.add_to_queue_button.clicked.connect(self.add_to_queue)
+        self.add_to_queue_button.setEnabled(False)  # Disable the button initially
+        hbox.addWidget(self.add_to_queue_button)
+
+        # Create a button to remove from queue
+        self.remove_from_queue_button = QPushButton('Remove from Queue', self)
+        self.remove_from_queue_button.clicked.connect(self.remove_from_queue)
+        self.remove_from_queue_button.setEnabled(False)  # Disable the button initially
+        hbox.addWidget(self.remove_from_queue_button)
+
+        # Add the horizontal box layout to the vertical box layout
+        vbox.addLayout(hbox)
+
+        # Add a header for the Queue
+        queue_header = QLabel('Queue')
+        vbox.addWidget(queue_header)
+
+        # Create queue list
+        self.queue_list = QListWidget(self)
+        self.queue_list.setSelectionMode(QAbstractItemView.MultiSelection)  # Allow multiple items to be selected
+        self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button)  # Connect the itemSelectionChanged signal
+        vbox.addWidget(self.queue_list)
+
+        # Add a header for the options
+        queue_header = QLabel('Options')
+        vbox.addWidget(queue_header)
+
+        # Create a dropdown menu for selecting the operation
+        self.operation_dropdown = QComboBox(self)
+        self.operation_dropdown.addItems(['Decrypt and Split', 'Decrypt Only', 'Download Only'])
+        self.operation_dropdown.currentTextChanged.connect(self.update_checkboxes)
+        vbox.addWidget(self.operation_dropdown)
+
+        # Create a checkbox for keeping or deleting the encrypted ISO file
+        self.keep_enc_checkbox = QCheckBox('Keep encrypted ISO', self)
+        self.keep_enc_checkbox.setChecked(False)
+        vbox.addWidget(self.keep_enc_checkbox)
+
+        # Create a checkbox for keeping or deleting the unsplit decrypted ISO file
+        self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit decrypted ISO', self)
+        self.keep_unsplit_dec_checkbox.setChecked(False)
+        vbox.addWidget(self.keep_unsplit_dec_checkbox)
+
+        # Create a checkbox for keeping or deleting the dkey file
+        self.keep_dkey_checkbox = QCheckBox('Keep dkey file', self)
+        self.keep_dkey_checkbox.setChecked(False)
+        vbox.addWidget(self.keep_dkey_checkbox)
+
+        # Create a settings button
+        self.settings_button = QPushButton('Settings', self)
+        self.settings_button.clicked.connect(self.open_settings)
+        vbox.addWidget(self.settings_button)
+
+        # Create a button to start the process
+        self.start_button = QPushButton('Start', self)
+        self.start_button.clicked.connect(self.start_process)
+        vbox.addWidget(self.start_button)
+
+        # Add a header for the Output Window
+        output_window_header = QLabel('Logs')
+        vbox.addWidget(output_window_header)
+
+        # Create an output window
+        self.output_window = OutputWindow(self)
+        vbox.addWidget(self.output_window)
+
+        # Add a header for the progress bar
+        queue_header = QLabel('Progress')
+        vbox.addWidget(queue_header)
+
+        # Create a progress bar and add it to the layout
+        self.progress_bar = QProgressBar(self)
+        vbox.addWidget(self.progress_bar)
+
+        # Add a header for the speed, eta
+        queue_header = QLabel('Download Speed & ETA')
+        vbox.addWidget(queue_header)
+
+        # Create labels for download speed and ETA
+        self.download_speed_label = QLabel(self)
+        vbox.addWidget(self.download_speed_label)
+        self.download_eta_label = QLabel(self)
+        vbox.addWidget(self.download_eta_label)
+        self.setLayout(vbox)
+
+        self.setWindowTitle('Myrient PS3 Downloader')
+        self.resize(800, 600)
+        self.show()
+
+    def start_process(self):
+        # Disable the buttons
+        self.settings_button.setEnabled(False)
+        self.add_to_queue_button.setEnabled(False)
+        self.remove_from_queue_button.setEnabled(False)
+        self.operation_dropdown.setEnabled(False)
+        self.keep_dkey_checkbox.setEnabled(False)
+        self.keep_enc_checkbox.setEnabled(False)
+        self.keep_unsplit_dec_checkbox.setEnabled(False)
+        self.keep_dkey_checkbox.setEnabled(False)
+        self.start_button.setEnabled(False)
+        
+        # If the queue is not empty, start downloading the first item
+        if not self.queue_list.count() == 0:
+            selected_iso = self.queue_list.item(0).text()
+            queue_position = f"{self.queue_list.row(self.queue_list.item(0)) + 1}/{self.queue_list.count()}"
+            base_name = os.path.splitext(selected_iso)[0]
+
+        # If the queue is not empty, start downloading the first item
+        if not self.queue_list.count() == 0:
+            selected_iso = self.queue_list.item(0).text()
+
+            # Check if both binaries are specified
+            if not self.ps3dec_binary or not self.splitps3iso_binary:
+                # Create a popup telling the user which binary/binaries are missing
+                missing_binaries = []
+                if not self.ps3dec_binary:
+                    missing_binaries.append('PS3Dec')
+                if not self.splitps3iso_binary:
+                    missing_binaries.append('splitps3iso')
+                QMessageBox.warning(self, 'Missing Binaries', f"The following binary/binaries are missing: {', '.join(missing_binaries)}")
+
+                # Open the settings window
+                self.open_settings()
+
+                return  # exit the method
+
+            # Get the selected operation from the dropdown menu
+            operation = self.operation_dropdown.currentText()
+
+            # Use the stored paths for the binaries
+            ps3dec_binary = self.ps3dec_binary
+            splitps3iso_binary = self.splitps3iso_binary
+
+           # Check if the selected ISO already exists
+            if not os.path.isfile(os.path.splitext(selected_iso)[0]):
+                # Download the selected ISO
+                self.output_window.append(f"({queue_position}) Download started for {base_name}...")
+                self.progress_bar.reset()  # Reset the progress bar to 0
+                self.download_thread = DownloadThread(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3/{selected_iso}", selected_iso)
+                self.download_thread.progress_signal.connect(self.progress_bar.setValue)
+                self.download_thread.speed_signal.connect(self.download_speed_label.setText)
+                self.download_thread.eta_signal.connect(self.download_eta_label.setText)
+
+                # Create a QEventLoop
+                loop = QEventLoop()
+                self.download_thread.finished.connect(loop.quit)
+
+                # Start the thread and the event loop
+                self.download_thread.start()
+                loop.exec_()
+
+                self.output_window.append(f"({queue_position}) Download complete for {base_name}!\n")
+                # Unzip the ISO and delete the ZIP file
+                unzip_file(selected_iso, '.', self.output_window)
+                os.remove(selected_iso)
+
+            # Check if the corresponding dkey file already exists
+            if not os.path.isfile(f"{os.path.splitext(selected_iso)[0]}.dkey"):
+                # Download the corresponding dkey file
+                self.output_window.append(f"({queue_position}) Getting dkey for {base_name}...")
+                self.progress_bar.reset()  # Reset the progress bar to 0
+                self.download_thread = DownloadThread(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/{os.path.splitext(selected_iso)[0]}.zip", f"{os.path.splitext(selected_iso)[0]}.zip")
+                self.download_thread.progress_signal.connect(self.progress_bar.setValue)
+
+                # Create a QEventLoop
+                loop = QEventLoop()
+                self.download_thread.finished.connect(loop.quit)
+
+                # Start the thread and the event loop
+                self.download_thread.start()
+                loop.exec_()
+                
+                # Unzip the dkey file and delete the ZIP file
+                with zipfile.ZipFile(f"{os.path.splitext(selected_iso)[0]}.zip", 'r') as zip_ref:
+                    zip_ref.extractall('.')
+                os.remove(f"{os.path.splitext(selected_iso)[0]}.zip")
+
+            # Read the first 32 characters of the .dkey file
+            with open(f"{os.path.splitext(selected_iso)[0]}.dkey", 'r') as file:
+                key = file.read(32)
+
+            # Run the PS3Dec command if decryption is enabled
+            self.output_window.append(f"({queue_position}) Decrypting ISO for {base_name}...")
+            if 'Decrypt' in operation:
+                if platform.system() == 'Windows':
+                    thread_count = multiprocessing.cpu_count() // 2
+                    run_command([f"{ps3dec_binary}", "--iso", f"{os.path.splitext(selected_iso)[0]}.iso", "--dk", key, "--tc", str(thread_count)],  self.output_window)
+                    # Rename the decrypted ISO file to remove '_decrypted'
+                    os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
+                    os.rename(f"{os.path.splitext(selected_iso)[0]}.iso_decrypted.iso", f"{os.path.splitext(selected_iso)[0]}.iso")
+                else:
+                    run_command([ps3dec_binary, 'd', 'key', key, f"{os.path.splitext(selected_iso)[0]}.iso"],  self.output_window)
+                    # Rename the original ISO file to .iso.enc
+                    os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
+                    os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
+
+            # Run splitps3iso on the processed .iso file if splitting is enabled
+            self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
+            if 'Split' in operation:
+                run_command([splitps3iso_binary, f"{os.path.splitext(selected_iso)[0]}.iso"],  self.output_window)
+                self.output_window.append(f"({queue_position}) splitps3iso completed for {base_name}")
+                # Delete the .iso file if the 'Keep unsplit decrypted ISO' checkbox is unchecked
+                if not self.keep_unsplit_dec_checkbox.isChecked():
+                    os.remove(f"{os.path.splitext(selected_iso)[0]}.iso")
+
+            # Delete the .dkey file if the 'Keep dkey file' checkbox is unchecked
+            if not self.keep_dkey_checkbox.isChecked():
+                os.remove(f"{os.path.splitext(selected_iso)[0]}.dkey")
+
+            # Delete the .iso.enc file if the checkbox is unchecked
+            if not self.keep_enc_checkbox.isChecked():
+                os.remove(f"{os.path.splitext(selected_iso)[0]}.iso.enc")
+
+            self.queue_list.takeItem(0)
+
+            # If there are more items in the queue, start the next download
+            if not self.queue_list.count() == 0:
+                self.start_process()
+
+        # Re-enable the buttons
+        self.settings_button.setEnabled(True)
+        self.add_to_queue_button.setEnabled(True)
+        self.remove_from_queue_button.setEnabled(True)
+        self.operation_dropdown.setEnabled(True)
+        self.keep_dkey_checkbox.setEnabled(True)
+        self.keep_enc_checkbox.setEnabled(True)
+        self.keep_unsplit_dec_checkbox.setEnabled(True)
+        self.keep_dkey_checkbox.setEnabled(True)
+        self.start_button.setEnabled(True)
+
+    def stop_process(self):
+        # TODO: Implement the logic to stop the current process
+        pass
+
+    def set_iso_list(self, iso_list):
+        self.iso_list = iso_list
+        self.result_list.clear()
+        self.result_list.addItems(self.iso_list)
 
     def is_valid_binary(self, path, binary_name):
         # Check if the path is not empty, the file exists and the filename ends with the correct binary name
@@ -125,7 +518,6 @@ class GUIDownloader(QWidget):
         self.ps3dec_binary = './ps3dec' if sys.platform != "Windows" else './ps3dec.exe'
         self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
         textbox.setText(self.ps3dec_binary)
-
 
     def download_splitps3iso(self, splitps3isoButton, textbox):
         # Create a new directory called 'workdir'
@@ -173,88 +565,26 @@ class GUIDownloader(QWidget):
         self.settings.setValue('splitps3iso_binary', self.splitps3iso_binary)
         textbox.setText(self.splitps3iso_binary)
 
+    def add_to_queue(self):
+        selected_items = self.result_list.selectedItems()
+        for item in selected_items:
+            item_text = item.text()
+            # Check if the item already exists in the queue
+            if not any(item_text == self.queue_list.item(i).text() for i in range(self.queue_list.count())):
+                self.queue_list.addItem(item_text)
 
-    def initUI(self):
-        vbox = QVBoxLayout()
+    def update_add_to_queue_button(self):
+        # Enable the 'Add to Queue' button if one or more items are selected in the result list
+        self.add_to_queue_button.setEnabled(bool(self.result_list.selectedItems()))
 
-        # Create a settings button
-        self.settings_button = QPushButton('Settings', self)
-        self.settings_button.clicked.connect(self.open_settings)
-        vbox.addWidget(self.settings_button)
+    def update_remove_from_queue_button(self):
+        # Enable the 'Remove from Queue' button if one or more items are selected in the queue list
+        self.remove_from_queue_button.setEnabled(bool(self.queue_list.selectedItems()))
 
-        # Create a search box
-        self.search_box = QLineEdit(self)
-        self.search_box.setPlaceholderText('Search...')
-        self.search_box.textChanged.connect(self.update_results)
-        vbox.addWidget(self.search_box)
-
-        # Create a list for results
-        self.result_list = QListWidget(self)
-        self.result_list.addItems(self.iso_list) 
-        vbox.addWidget(self.result_list)
-
-        # Create a dropdown menu for selecting the operation
-        self.operation_dropdown = QComboBox(self)
-        self.operation_dropdown.addItems(['Decrypt and Split', 'Decrypt Only', 'Download Only'])
-        self.operation_dropdown.currentTextChanged.connect(self.update_checkboxes)
-        vbox.addWidget(self.operation_dropdown)
-
-        # Create a checkbox for keeping or deleting the encrypted ISO file
-        self.keep_enc_checkbox = QCheckBox('Keep encrypted ISO', self)
-        self.keep_enc_checkbox.setChecked(False)
-        vbox.addWidget(self.keep_enc_checkbox)
-
-        # Create a checkbox for keeping or deleting the unsplit decrypted ISO file
-        self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit decrypted ISO', self)
-        self.keep_unsplit_dec_checkbox.setChecked(False)
-        vbox.addWidget(self.keep_unsplit_dec_checkbox)
-
-        # Create a checkbox for keeping or deleting the dkey file
-        self.keep_dkey_checkbox = QCheckBox('Keep dkey file', self)
-        self.keep_dkey_checkbox.setChecked(False)
-        vbox.addWidget(self.keep_dkey_checkbox)
-
-        # Create a button to start the process
-        self.start_button = QPushButton('Start', self)
-        self.start_button.clicked.connect(self.start_process)
-        vbox.addWidget(self.start_button)
-
-        # Create an output window
-        self.output_window = OutputWindow(self)
-        vbox.addWidget(self.output_window)
-
-        self.setLayout(vbox)
-
-        self.setWindowTitle('Myrient PS3 Downloader')
-        self.resize(800, 600)
-        self.show()
-
-    def update_results(self):
-        # Get the search term from the search box
-        search_term = self.search_box.text()
-
-        # Filter the ISO list based on the search term
-        filtered_iso_list = [iso for iso in self.iso_list if search_term.lower() in iso.lower()]
-
-        # Update the result list
-        self.result_list.clear()
-        self.result_list.addItems(filtered_iso_list)
-
-    def update_checkboxes(self):
-        # Show or hide the 'Keep unsplit decrypted ISO' checkbox based on the selected operation
-        if self.operation_dropdown.currentText() == 'Decrypt and Split':
-            self.keep_unsplit_dec_checkbox.show()
-            self.keep_dkey_checkbox.setChecked(False)
-        else:
-            self.keep_unsplit_dec_checkbox.hide()
-
-        # Show or hide the 'Keep encrypted ISO' checkbox based on the selected operation
-        if self.operation_dropdown.currentText() == 'Download Only':
-            self.keep_enc_checkbox.hide()
-            self.keep_dkey_checkbox.setChecked(True)
-        else:
-            self.keep_dkey_checkbox.setChecked(False)
-            self.keep_enc_checkbox.show()
+    def remove_from_queue(self):
+        selected_items = self.queue_list.selectedItems()
+        for item in selected_items:
+            self.queue_list.takeItem(self.queue_list.row(item))
 
     def open_settings(self):
         dialog = QDialog()
@@ -314,6 +644,11 @@ class GUIDownloader(QWidget):
 
         create_binary_section("splitps3iso:", splitps3isoButton, splitps3isoSelectButton, splitps3isoPathTextbox)
 
+        # ISO List section
+        iso_list_button = QPushButton('Update ISO List')
+        iso_list_button.clicked.connect(self.update_iso_list)
+        vbox.addWidget(iso_list_button)
+
         # Close button
         closeButton = QPushButton('Continue')
         closeButton.clicked.connect(dialog.close)
@@ -321,6 +656,9 @@ class GUIDownloader(QWidget):
 
         # Show the dialog
         dialog.exec_()
+
+    def update_iso_list(self):
+        self.get_iso_list_thread.start()
 
     def open_file_dialog_ps3dec(self, textbox):
         options = QFileDialog.Options()
@@ -340,93 +678,32 @@ class GUIDownloader(QWidget):
             self.settings.setValue('splitps3iso_binary', fileName)
             textbox.setText(fileName)  # Update the textbox with the new path
 
+    def update_results(self):
+        # Get the search term from the search box
+        search_term = self.search_box.text()
 
+        # Filter the ISO list based on the search term
+        filtered_iso_list = [iso for iso in self.iso_list if search_term.lower() in iso.lower()]
 
+        # Update the result list
+        self.result_list.clear()
+        self.result_list.addItems(filtered_iso_list)
 
-    def start_process(self):
-        # Check if both binaries are specified
-        if not self.ps3dec_binary or not self.splitps3iso_binary:
-            # Create a popup telling the user which binary/binaries are missing
-            missing_binaries = []
-            if not self.ps3dec_binary:
-                missing_binaries.append('PS3Dec')
-            if not self.splitps3iso_binary:
-                missing_binaries.append('splitps3iso')
-            QMessageBox.warning(self, 'Missing Binaries', f"The following binary/binaries are missing: {', '.join(missing_binaries)}")
+    def update_checkboxes(self):
+        # Show or hide the 'Keep unsplit decrypted ISO' checkbox based on the selected operation
+        if self.operation_dropdown.currentText() == 'Decrypt and Split':
+            self.keep_unsplit_dec_checkbox.show()
+            self.keep_dkey_checkbox.setChecked(False)
+        else:
+            self.keep_unsplit_dec_checkbox.hide()
 
-            # Open the settings window
-            self.open_settings()
-
-            return  # exit the method
-
-        # Get the selected ISO from the result list
-        selected_iso = self.result_list.currentItem().text()
-
-        # Get the selected operation from the dropdown menu
-        operation = self.operation_dropdown.currentText()
-
-        # Use the stored paths for the binaries
-        ps3dec_binary = self.ps3dec_binary
-        splitps3iso_binary = self.splitps3iso_binary
-
-        # Check if the selected ISO already exists
-        if not os.path.isfile(os.path.splitext(selected_iso)[0]):
-            # Download the selected ISO
-            download_file(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3/{selected_iso}", selected_iso)
-
-            # Unzip the ISO and delete the ZIP file
-            with zipfile.ZipFile(selected_iso, 'r') as zip_ref:
-                zip_ref.extractall('.')
-            os.remove(selected_iso)
-
-        # Check if the corresponding dkey file already exists
-        if not os.path.isfile(f"{os.path.splitext(selected_iso)[0]}.dkey"):
-            # Download the corresponding dkey file
-            download_file(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/{os.path.splitext(selected_iso)[0]}.zip", f"{os.path.splitext(selected_iso)[0]}.zip")
-
-            # Unzip the dkey file and delete the ZIP file
-            with zipfile.ZipFile(f"{os.path.splitext(selected_iso)[0]}.zip", 'r') as zip_ref:
-                zip_ref.extractall('.')
-            os.remove(f"{os.path.splitext(selected_iso)[0]}.zip")
-
-        # Read the first 32 characters of the .dkey file
-        with open(f"{os.path.splitext(selected_iso)[0]}.dkey", 'r') as file:
-            key = file.read(32)
-
-        # Run the PS3Dec command if decryption is enabled
-        if 'Decrypt' in operation:
-            if platform.system() == 'Windows':
-                thread_count = multiprocessing.cpu_count() // 2
-                run_command([f"{ps3dec_binary}", "--iso", f"{os.path.splitext(selected_iso)[0]}.iso", "--dk", key, "--tc", str(thread_count)], self.output_window)
-                # Rename the decrypted ISO file to remove '_decrypted'
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso_decrypted.iso", f"{os.path.splitext(selected_iso)[0]}.iso")
-            else:
-                run_command([ps3dec_binary, 'd', 'key', key, f"{os.path.splitext(selected_iso)[0]}.iso"], self.output_window)
-                # Rename the original ISO file to .iso.enc
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
-
-
-        # Run splitps3iso on the processed .iso file if splitting is enabled
-        if 'Split' in operation:
-            run_command([splitps3iso_binary, f"{os.path.splitext(selected_iso)[0]}.iso"], self.output_window)
-            print(f"splitps3iso completed for {os.path.splitext(selected_iso)[0]}")
-            # Delete the .iso file if the 'Keep unsplit decrypted ISO' checkbox is unchecked
-            if not self.keep_unsplit_dec_checkbox.isChecked():
-                os.remove(f"{os.path.splitext(selected_iso)[0]}.iso")
-
-        # Delete the .dkey file if the 'Keep dkey file' checkbox is unchecked
-        if not self.keep_dkey_checkbox.isChecked():
-            os.remove(f"{os.path.splitext(selected_iso)[0]}.dkey")
-
-        # Delete the .iso.enc file if the checkbox is unchecked
-        if not self.keep_enc_checkbox.isChecked():
-            os.remove(f"{os.path.splitext(selected_iso)[0]}.iso.enc")
-
-    def stop_process(self):
-        # TODO: Implement the logic to stop the current process
-        pass
+        # Show or hide the 'Keep encrypted ISO' checkbox based on the selected operation
+        if self.operation_dropdown.currentText() == 'Download Only':
+            self.keep_enc_checkbox.hide()
+            self.keep_dkey_checkbox.setChecked(True)
+        else:
+            self.keep_dkey_checkbox.setChecked(False)
+            self.keep_enc_checkbox.show()
 
 if __name__ == '__main__':
     try:
