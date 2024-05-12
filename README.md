@@ -12,7 +12,7 @@ installation and usage:
 2. `pip install -r requirements.txt`
 3. `python3 ./myrientDownloaderGUI.py`
 
-alternatively grab a precompiled exe or linux binary from the releases tab
+alternatively grab a precompiled exe or linux binary from the releases tab (nvm windows defender sees pyinstaller scripts as trojans :( )
 
 if you're on a linux distro like arch linux whose python environment is externally managed you can install requirements like so:
 `sudo pacman -S python-requests python-beautifulsoup4 python-pyqt5 python-tqdm`
