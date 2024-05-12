@@ -1,6 +1,9 @@
 # ignore softwarelist.json
 softwarelist.json
 
+# ignore ini
+*.ini
+
 # ignore .vscode
 .vscode/
 
