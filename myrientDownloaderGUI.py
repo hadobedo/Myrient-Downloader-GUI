@@ -8,19 +8,15 @@ import platform
 import urllib.request
 import tarfile
 import shutil
-import glob
 import multiprocessing
-import threading
 import urllib
 import json
-import datetime
 import time
 import aiohttp, asyncio
-from tqdm import tqdm
 from urllib.parse import unquote
 from bs4 import BeautifulSoup
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, QFileDialog, QMessageBox, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar
-from PyQt5.QtCore import *
+from PyQt5.QtCore import QThread, pyqtSignal, QSettings, QEventLoop
 from PyQt5.QtGui import QTextCursor
 
 class GetISOListThread(QThread):
@@ -84,10 +80,7 @@ def run_command(command, output_window):
 # Function to unzip a file with progress
 def unzip_file(zip_path, output_path, output_window):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        total_files = len(zip_ref.infolist())
         for i, file in enumerate(zip_ref.infolist(), start=1):
-            # Show a rotating ellipsis
-            ellipsis = '.' * (i % 4)
             output_window.write(f"Extracting {file.filename} (program may look frozen, please wait!)")
             zip_ref.extract(file, output_path)
             QApplication.processEvents()
@@ -103,9 +96,9 @@ class DownloadThread(QThread):
         self.url = url
         self.filename = filename
         self.retries = retries
-        self.existing_file_size = 0  # Initialize existing_file_size to 0
-        self.start_time = None
-        self.current_session_downloaded = 0  # Initialize current_session_downloaded to 0
+        self.existing_file_size = 0 # used for speed, eta calc
+        self.start_time = None # used for speed, eta calc
+        self.current_session_downloaded = 0  # used for speed, eta calc
 
     async def download(self):
         headers = {
@@ -184,11 +177,9 @@ class DownloadThread(QThread):
         self.download_complete_signal.emit()
 
 def download_file(self, url, filename):
-    self.progress_bar.reset()  # Reset the progress bar to 0
+    self.progress_bar.reset()  # Reset the progress bar to 0 when new download begins
     self.download_thread = DownloadThread(url, filename)
     self.download_thread.start()
-
-
 
 class GUIDownloader(QWidget):
     def __init__(self):
@@ -221,8 +212,8 @@ class GUIDownloader(QWidget):
 
         # Check if the saved settings are valid
         if not self.is_valid_binary(self.ps3dec_binary, 'ps3dec') or not self.is_valid_binary(self.splitps3iso_binary, 'splitps3iso'):
-            # If not, open the settings dialog
-            self.open_settings()
+            # If not, open the first startup prompt
+            self.first_startup()
 
         self.iso_list = ['Loading from https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/...']
 
@@ -248,9 +239,9 @@ class GUIDownloader(QWidget):
 
         # Create a list for results (software list)
         self.result_list = QListWidget(self)
-        self.result_list.setSelectionMode(QAbstractItemView.MultiSelection)  # Allow multiple items to be selected
+        self.result_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.result_list.addItems(self.iso_list)
-        self.result_list.itemSelectionChanged.connect(self.update_add_to_queue_button)  # Connect the itemSelectionChanged signal
+        self.result_list.itemSelectionChanged.connect(self.update_add_to_queue_button)
         vbox.addWidget(self.result_list)
 
         # Create a horizontal box layout
@@ -259,13 +250,13 @@ class GUIDownloader(QWidget):
         # Create a button to add to queue
         self.add_to_queue_button = QPushButton('Add to Queue', self)
         self.add_to_queue_button.clicked.connect(self.add_to_queue)
-        self.add_to_queue_button.setEnabled(False)  # Disable the button initially
+        self.add_to_queue_button.setEnabled(False)  # Disable button initially
         hbox.addWidget(self.add_to_queue_button)
 
         # Create a button to remove from queue
         self.remove_from_queue_button = QPushButton('Remove from Queue', self)
         self.remove_from_queue_button.clicked.connect(self.remove_from_queue)
-        self.remove_from_queue_button.setEnabled(False)  # Disable the button initially
+        self.remove_from_queue_button.setEnabled(False)  # Disable button initially
         hbox.addWidget(self.remove_from_queue_button)
 
         # Add the horizontal box layout to the vertical box layout
@@ -277,8 +268,8 @@ class GUIDownloader(QWidget):
 
         # Create queue list
         self.queue_list = QListWidget(self)
-        self.queue_list.setSelectionMode(QAbstractItemView.MultiSelection)  # Allow multiple items to be selected
-        self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button)  # Connect the itemSelectionChanged signal
+        self.queue_list.setSelectionMode(QAbstractItemView.MultiSelection)  
+        self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button) 
         vbox.addWidget(self.queue_list)
 
         # Add a header for the options
@@ -477,6 +468,8 @@ class GUIDownloader(QWidget):
             if not self.queue_list.count() == 0:
                 self.start_process()
 
+        self.output_window.append(f"({queue_position}) {base_name} complete!")
+
         # Re-enable the buttons
         self.settings_button.setEnabled(True)
         self.add_to_queue_button.setEnabled(True)
@@ -589,10 +582,15 @@ class GUIDownloader(QWidget):
         for item in selected_items:
             self.queue_list.takeItem(self.queue_list.row(item))
 
-    def open_settings(self):
+    def settings_welcome_dialog(self, title, close_button_text, add_iso_list_section=False, welcome_text=None):
         dialog = QDialog()
-        dialog.setWindowTitle("Tools")
+        dialog.setWindowTitle(title)
         vbox = QVBoxLayout(dialog)
+
+        # Adds welcome text if provided
+        if welcome_text is not None:
+            welcome_label = QLabel(welcome_text)
+            vbox.addWidget(welcome_label)
 
         def create_binary_section(name, download_button, select_button, path_textbox):
             section_label = QLabel(name)
@@ -614,7 +612,6 @@ class GUIDownloader(QWidget):
         if platform.system() != 'Windows':
             ps3decButton.setEnabled(False)
             ps3decButton.setText("Can't get prebuilt PS3Dec on Linux")
-
 
         # Check if ps3dec is detected
         if os.path.isfile("ps3dec") or os.path.isfile("ps3dec.exe"):
@@ -648,17 +645,25 @@ class GUIDownloader(QWidget):
         create_binary_section("splitps3iso:", splitps3isoButton, splitps3isoSelectButton, splitps3isoPathTextbox)
 
         # ISO List section
-        iso_list_button = QPushButton('Update ISO List')
-        iso_list_button.clicked.connect(self.update_iso_list)
-        vbox.addWidget(iso_list_button)
+        if add_iso_list_section:
+            iso_list_button = QPushButton('Update ISO List')
+            iso_list_button.clicked.connect(self.update_iso_list)
+            vbox.addWidget(iso_list_button)
 
         # Close button
-        closeButton = QPushButton('Continue')
+        closeButton = QPushButton(close_button_text)
         closeButton.clicked.connect(dialog.close)
         vbox.addWidget(closeButton)
 
         # Show the dialog
         dialog.exec_()
+
+    def open_settings(self):
+        self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
+
+    def first_startup(self):
+        welcome_text = "Welcome! The script can attempt to grab PS3Dec and splitps3iso automatically or you can set them manually"
+        self.settings_welcome_dialog("Welcome!", "Continue", welcome_text=welcome_text)
 
     def update_iso_list(self):
         self.get_iso_list_thread.start()
