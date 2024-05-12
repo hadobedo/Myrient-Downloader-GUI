@@ -3,3 +3,15 @@ softwarelist.json
 
 # ignore .vscode
 .vscode/
+
+# ignore logs
+log/
+
+# ignore binaries
+ps3dec*
+splitps3iso*
+
+# ignore isos and zips
+*.zip
+*.iso
+*.iso.*
