@@ -1,33 +1,32 @@
 # myrientgrabber-ps3
+PS3 ISO downloader/decryptor/splitter, written in Python
+![Screenshot_20240512_045047](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/68b227d3-67b9-49a3-a47e-7606217e0964)
 
-ps3 game grabber/decryptor/splitter written in python
+Features:
+- Downloads, decrypts and splits PS3 ISO's 'automatically'
+- User-friendly setup (prompts users to download binaries, has option to grab automatically etc)
+- Cross platform, should work on Windows and Linux, may work on macOS
 
-features:
-- automatic download, decryption and splitting of ps3 isos
-- option to download ps3dec, splitps3iso binaries automatically from within the gui
-- cross platform, should work on windows and linux, may work on macos
+Installation and Usage:
+1. Clone the repo, cd into the folder `git clone https://github.com/hadobedo/myrientgrabber-ps3/ && cd myrientgrabber-ps3/`
+2. Install the requirements (if on Arch Linux see below) `pip install -r requirements.txt`
+3. Run the script! `python3 ./myrientDownloaderGUI.py`
 
-installation and usage:
-1. `git clone https://github.com/hadobedo/myrientgrabber-ps3/ && cd myrientgrabber-ps3/`
-2. `pip install -r requirements.txt`
-3. `python3 ./myrientDownloaderGUI.py`
+Alternatively grab a precompiled EXE or Linux binary from the releases tab (nvm Windows Defender saw my pyinstaller script as trojan, will try again after cleaning up code(?) )
 
-alternatively grab a precompiled exe or linux binary from the releases tab (nvm windows defender sees pyinstaller scripts as trojans :( )
-
-if you're on a linux distro like arch linux whose python environment is externally managed you can install requirements like so:
+If you're on a Arch Linux where the Python environment is externally managed you can install requirements like so:
 `sudo pacman -S python-requests python-beautifulsoup4 python-pyqt5 python-tqdm`
 
-if you're on arch linux and you need ps3dec you can [get it from the aur](https://aur.archlinux.org/packages/ps3dec-git)
+If you're on Arch Linux and you need PS3Dec you can [get it from the aur](https://aur.archlinux.org/packages/ps3dec-git)
 
 credit:
 [Redrrx's PS3Dec](https://github.com/Redrrx/ps3dec) (uses their ps3dec.exe Rust rewrite for Windows, it rocks)
 [bucanero's ps3iso-utils](https://github.com/bucanero/ps3iso-utils) (uses their splitps3iso binary)
+gpt-4 :)
 
 todo:
-- better output
 - clean up code
 - add more game support for other consoles?
-- multithreading
 
 screenshots:
 ![Screenshot_20240512_045047](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/68b227d3-67b9-49a3-a47e-7606217e0964)
