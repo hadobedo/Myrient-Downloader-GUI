@@ -19,6 +19,10 @@ if you're on a linux distro like arch linux whose python environment is external
 
 if you're on arch linux and you need ps3dec you can [get it from the aur](https://aur.archlinux.org/packages/ps3dec-git)
 
+credit:
+[Redrrx's PS3Dec](https://github.com/Redrrx/ps3dec) (uses their ps3dec.exe Rust rewrite for Windows, it rocks)
+[bucanero's ps3iso-utils](https://github.com/bucanero/ps3iso-utils) (uses their splitps3iso binary)
+
 todo:
 - better output
 - clean up code
