@@ -186,7 +186,7 @@ class GUIDownloader(QWidget):
         super().__init__()
 
         # Load the user's settings
-        self.settings = QSettings('hadobedo', 'myrientDownloaderGUI')
+        self.settings = QSettings('./myrientDownloaderGUI.ini', QSettings.IniFormat)
         self.ps3dec_binary = self.settings.value('ps3dec_binary', '')
         self.splitps3iso_binary = self.settings.value('splitps3iso_binary', '')
 
