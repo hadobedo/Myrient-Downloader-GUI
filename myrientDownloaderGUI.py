@@ -144,7 +144,10 @@ class DownloadThread(QThread):
 
                                 # Calculate speed and ETA
                                 elapsed_time = time.time() - self.start_time
-                                speed = self.current_session_downloaded / elapsed_time  # Calculate speed based on current session download
+                                if elapsed_time > 0:
+                                    speed = self.current_session_downloaded / elapsed_time  # Calculate speed based on current session download
+                                else:
+                                    speed = 0
                                 remaining_bytes = total_size - self.existing_file_size
                                 eta = remaining_bytes / speed if speed > 0 else 0
 
