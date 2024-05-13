@@ -533,16 +533,17 @@ class GUIDownloader(QWidget):
         extracted_files = self.unzip_file(selected_iso, '.', self.output_window)
         os.remove(selected_iso)
 
-        # Rename the extracted .pkg and .rap files to the original name of the zip file
+        # Rename the extracted .pkg file to the original name of the zip file
         for file in extracted_files:
-            if file.endswith('.pkg') or file.endswith('.rap'):
+            if file.endswith('.pkg'):
                 new_file_path = f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}"
                 os.rename(file, new_file_path)
                 # If the 'split PKG' checkbox is checked, split the PKG file
-                if self.split_pkg_checkbox.isChecked() and file.endswith('.pkg'):
+                if self.split_pkg_checkbox.isChecked():
                     self.split_pkg(new_file_path)
 
         self.queue_list.takeItem(0)
+
 
         self.output_window.append(f"({queue_position}) {base_name} ready!")
 
