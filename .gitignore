@@ -1,5 +1,5 @@
-# ignore softwarelist.json
-softwarelist.json
+# ignore json
+*.json
 
 # ignore ini
 *.ini
@@ -14,7 +14,10 @@ log/
 ps3dec*
 splitps3iso*
 
-# ignore isos and zips
+# ignore game files
 *.zip
 *.iso
 *.iso.*
+*.pkg
+*.pkg.*
+*.rap
