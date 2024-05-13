@@ -1,6 +1,7 @@
 # myrientgrabber-ps3
 PS3 ISO downloader/decryptor/splitter, written in Python
-![Screenshot_20240512_045047](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/68b227d3-67b9-49a3-a47e-7606217e0964)
+![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/e9641da2-53ec-4915-bd7a-ebc916d398fc)
+
 
 Features:
 - Downloads, decrypts and splits PS3 ISO's 'automatically' from [the Myrient Video Game Preservationists](https://myrient.erista.me)
@@ -30,7 +31,7 @@ TODO:
 - add more game support for other consoles?
 
 screenshots:
-![Screenshot_20240512_045047](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/68b227d3-67b9-49a3-a47e-7606217e0964)
+![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/a1c6401e-a54c-4d2b-b2c9-1346165fcb88)
 ![Screenshot_20240511_032153](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/a2be69ad-424f-45da-a6b3-db06519d65a4)
 
 
