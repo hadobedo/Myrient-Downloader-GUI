@@ -16,10 +16,11 @@ import aiohttp, asyncio
 import urllib.parse
 from urllib.parse import unquote
 from bs4 import BeautifulSoup
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, QFileDialog, QMessageBox, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar, QTabWidget
+from PyQt5.QtWidgets import QApplication, QGridLayout, QGroupBox, QWidget, QVBoxLayout, QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, QFileDialog, QMessageBox, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar, QTabWidget
 from PyQt5.QtCore import QThread, pyqtSignal, QSettings, QEventLoop
 from PyQt5.QtGui import QTextCursor
 from threading import Lock
+from pathlib import Path
 
 class GetPS3ISOListThread(QThread):
     signal = pyqtSignal('PyQt_PyObject')
@@ -98,18 +99,6 @@ def run_command(command, output_window):
     return_code = process.wait()
     if return_code:
         raise subprocess.CalledProcessError(return_code, command)
-
-# Function to unzip a file with progress
-def unzip_file(zip_path, output_path, output_window):
-    extracted_files = []
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        for i, file in enumerate(zip_ref.infolist(), start=1):
-            output_window.write(f"Extracting {file.filename} (program may look frozen, please wait!)\n")
-            zip_ref.extract(file, output_path)
-            extracted_files.append(file.filename)
-            QApplication.processEvents()
-    return extracted_files
-
 
 class DownloadThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -214,30 +203,21 @@ class GUIDownloader(QWidget):
         # Load the user's settings
         self.settings = QSettings('./myrientDownloaderGUI.ini', QSettings.IniFormat)
         self.ps3dec_binary = self.settings.value('ps3dec_binary', '')
-        self.splitps3iso_binary = self.settings.value('splitps3iso_binary', '')
 
         # Check if the saved binary paths exist
         if not os.path.isfile(self.ps3dec_binary):
             self.ps3dec_binary = ''
             self.settings.setValue('ps3dec_binary', '')
-        if not os.path.isfile(self.splitps3iso_binary):
-            self.splitps3iso_binary = ''
-            self.settings.setValue('splitps3iso_binary', '')
 
-        # Check if ps3dec and splitps3iso are in the user's PATH
+        # Check if ps3dec is in the user's PATH
         ps3dec_in_path = shutil.which("ps3dec") or shutil.which("PS3Dec") or shutil.which("ps3dec.exe") or shutil.which("PS3Dec.exe")
-        splitps3iso_in_path = shutil.which("splitps3iso") or shutil.which("SplitPS3ISO") or shutil.which("splitps3iso.exe") or shutil.which("SplitPS3ISO.exe")
 
         if ps3dec_in_path:
             self.ps3dec_binary = ps3dec_in_path
             self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
 
-        if splitps3iso_in_path:
-            self.splitps3iso_binary = splitps3iso_in_path
-            self.settings.setValue('splitps3iso_binary', self.splitps3iso_binary)
-
         # Check if the saved settings are valid
-        if not self.is_valid_binary(self.ps3dec_binary, 'ps3dec') or not self.is_valid_binary(self.splitps3iso_binary, 'splitps3iso'):
+        if not self.is_valid_binary(self.ps3dec_binary, 'ps3dec'):
             # If not, open the first startup prompt
             self.first_startup()
 
@@ -314,30 +294,46 @@ class GUIDownloader(QWidget):
         self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button) 
         vbox.addWidget(self.queue_list)
 
+        # Create a grid layout for the options
+        grid = QGridLayout()
+
         # Add a header for the options
-        queue_header = QLabel('ISO Options')
-        vbox.addWidget(queue_header)
+        iso_options_header = QLabel('ISO Settings')
+        grid.addWidget(iso_options_header, 0, 0)
+
+        pkg_options_header = QLabel('PKG Settings')
+        grid.addWidget(pkg_options_header, 0, 1)
 
         # Create a dropdown menu for selecting the operation
         self.operation_dropdown = QComboBox(self)
         self.operation_dropdown.addItems(['Decrypt and Split', 'Decrypt Only', 'Download Only'])
         self.operation_dropdown.currentTextChanged.connect(self.update_checkboxes)
-        vbox.addWidget(self.operation_dropdown)
+        grid.addWidget(self.operation_dropdown, 1, 0)
+
+        # Create a checkbox for splitting the PKG file
+        self.split_pkg_checkbox = QCheckBox('Split PKG', self)
+        self.split_pkg_checkbox.setChecked(False)
+        grid.addWidget(self.split_pkg_checkbox, 1, 1)
 
         # Create a checkbox for keeping or deleting the encrypted ISO file
         self.keep_enc_checkbox = QCheckBox('Keep encrypted ISO', self)
         self.keep_enc_checkbox.setChecked(False)
-        vbox.addWidget(self.keep_enc_checkbox)
+        grid.addWidget(self.keep_enc_checkbox, 2, 0)
 
         # Create a checkbox for keeping or deleting the unsplit decrypted ISO file
         self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit decrypted ISO', self)
         self.keep_unsplit_dec_checkbox.setChecked(False)
-        vbox.addWidget(self.keep_unsplit_dec_checkbox)
+        grid.addWidget(self.keep_unsplit_dec_checkbox, 3, 0)
 
         # Create a checkbox for keeping or deleting the dkey file
         self.keep_dkey_checkbox = QCheckBox('Keep dkey file', self)
         self.keep_dkey_checkbox.setChecked(False)
-        vbox.addWidget(self.keep_dkey_checkbox)
+        grid.addWidget(self.keep_dkey_checkbox, 4, 0)
+
+        # Create a group box to contain the grid layout
+        group_box = QGroupBox()
+        group_box.setLayout(grid)
+        vbox.addWidget(group_box)
 
         # Create a settings button
         self.settings_button = QPushButton('Settings', self)
@@ -374,6 +370,7 @@ class GUIDownloader(QWidget):
         vbox.addWidget(self.download_speed_label)
         self.download_eta_label = QLabel(self)
         vbox.addWidget(self.download_eta_label)
+
         self.setLayout(vbox)
 
         self.setWindowTitle('Myrient PS3 Downloader')
@@ -381,6 +378,18 @@ class GUIDownloader(QWidget):
         self.show()
 
     def start_download(self):
+        # Disable the GUI buttons
+        self.settings_button.setEnabled(False)
+        self.add_to_queue_button.setEnabled(False)
+        self.remove_from_queue_button.setEnabled(False)
+        self.operation_dropdown.setEnabled(False)
+        self.keep_dkey_checkbox.setEnabled(False)
+        self.keep_enc_checkbox.setEnabled(False)
+        self.keep_unsplit_dec_checkbox.setEnabled(False)
+        self.split_pkg_checkbox.setEnabled(False)
+        self.keep_dkey_checkbox.setEnabled(False)
+        self.start_button.setEnabled(False)
+
         if self.queue_list.count() > 0:
             item_text = self.queue_list.item(0).text()
             operation = self.operation_dropdown.currentText()  # Get the current operation from the dropdown
@@ -396,6 +405,18 @@ class GUIDownloader(QWidget):
                 self.downloadps3isozip(item_text, f"{self.processed_items}/{self.total_items}", operation)
             else:
                 self.downloadps3psnzip(item_text, f"{self.processed_items}/{self.total_items}", operation)
+        
+        # Re-enable the buttons
+        self.settings_button.setEnabled(True)
+        self.add_to_queue_button.setEnabled(True)
+        self.remove_from_queue_button.setEnabled(True)
+        self.operation_dropdown.setEnabled(True)
+        self.keep_dkey_checkbox.setEnabled(True)
+        self.keep_enc_checkbox.setEnabled(True)
+        self.keep_unsplit_dec_checkbox.setEnabled(True)
+        self.split_pkg_checkbox.setEnabled(True)
+        self.keep_dkey_checkbox.setEnabled(True)
+        self.start_button.setEnabled(True)
 
     def downloadhelper(self, selected_iso, queue_position, operation, url):
         # URL-encode the selected_iso
@@ -404,7 +425,6 @@ class GUIDownloader(QWidget):
         # Load the user's settings
         settings = QSettings('./myrientDownloaderGUI.ini', QSettings.IniFormat)
         ps3dec_binary = settings.value('ps3dec_binary', '')
-        splitps3iso_binary = settings.value('splitps3iso_binary', '')
 
         # Compute base_name from selected_iso
         base_name = os.path.splitext(selected_iso)[0]
@@ -435,7 +455,7 @@ class GUIDownloader(QWidget):
         self.downloadhelper(selected_iso, queue_position, operation, url)
 
         # Unzip the ISO and delete the ZIP file
-        unzip_file(selected_iso, '.', self.output_window)
+        self.unzip_file(selected_iso, '.', self.output_window)
         os.remove(selected_iso)
 
         # Check if the corresponding dkey file already exists
@@ -478,11 +498,12 @@ class GUIDownloader(QWidget):
                 os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
                 os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
 
-        # Run splitps3iso on the processed .iso file if splitting is enabled
+        # Split processed .iso file if splitting is enabled
         self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
         if 'Split' in operation:
-            run_command([self.splitps3iso_binary, f"{os.path.splitext(selected_iso)[0]}.iso"],  self.output_window)
-            self.output_window.append(f"({queue_position}) splitps3iso completed for {base_name}")
+            # Call the split_ps3_iso function
+            self.split_ps3_iso(f"{os.path.splitext(selected_iso)[0]}.iso")
+            self.output_window.append(f"({queue_position}) split_ps3iso completed for {base_name}")
             # Delete the .iso file if the 'Keep unsplit decrypted ISO' checkbox is unchecked
             if not self.keep_unsplit_dec_checkbox.isChecked():
                 os.remove(f"{os.path.splitext(selected_iso)[0]}.iso")
@@ -503,30 +524,23 @@ class GUIDownloader(QWidget):
         if self.queue_list.count() > 0:
             self.start_download()
 
-        # Re-enable the buttons
-        self.settings_button.setEnabled(True)
-        self.add_to_queue_button.setEnabled(True)
-        self.remove_from_queue_button.setEnabled(True)
-        self.operation_dropdown.setEnabled(True)
-        self.keep_dkey_checkbox.setEnabled(True)
-        self.keep_enc_checkbox.setEnabled(True)
-        self.keep_unsplit_dec_checkbox.setEnabled(True)
-        self.keep_dkey_checkbox.setEnabled(True)
-        self.start_button.setEnabled(True)
-
     def downloadps3psnzip(self, selected_iso, queue_position, operation):
         url = "https://download.mtcontent.rs/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
         base_name = os.path.splitext(selected_iso)[0]
         self.downloadhelper(selected_iso, queue_position, operation, url)
 
         # Unzip the ISO and delete the ZIP file
-        extracted_files = unzip_file(selected_iso, '.', self.output_window)
+        extracted_files = self.unzip_file(selected_iso, '.', self.output_window)
         os.remove(selected_iso)
 
         # Rename the extracted .pkg and .rap files to the original name of the zip file
         for file in extracted_files:
             if file.endswith('.pkg') or file.endswith('.rap'):
-                os.rename(file, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                new_file_path = f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}"
+                os.rename(file, new_file_path)
+                # If the 'split PKG' checkbox is checked, split the PKG file
+                if self.split_pkg_checkbox.isChecked() and file.endswith('.pkg'):
+                    self.split_pkg(new_file_path)
 
         self.queue_list.takeItem(0)
 
@@ -535,17 +549,6 @@ class GUIDownloader(QWidget):
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
-
-        # Re-enable the buttons
-        self.settings_button.setEnabled(True)
-        self.add_to_queue_button.setEnabled(True)
-        self.remove_from_queue_button.setEnabled(True)
-        self.operation_dropdown.setEnabled(True)
-        self.keep_dkey_checkbox.setEnabled(True)
-        self.keep_enc_checkbox.setEnabled(True)
-        self.keep_unsplit_dec_checkbox.setEnabled(True)
-        self.keep_dkey_checkbox.setEnabled(True)
-        self.start_button.setEnabled(True)
 
     def add_to_queue(self):
         selected_items = self.result_list.currentWidget().selectedItems()
@@ -593,6 +596,62 @@ class GUIDownloader(QWidget):
                 return filename.lower() == binary_name.lower()
         return False
 
+    def split_pkg(self, file_path):
+        file_size = os.path.getsize(file_path)
+        if file_size >= 4294967295:
+            chunk_size = 4294967295
+            num_parts = -(-file_size // chunk_size)  # Calculate the number of parts
+            with open(file_path, 'rb') as f:
+                i = 0
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    with open(f"{Path(file_path).stem}.pkg.666{str(i).zfill(2)}", 'wb') as chunk_file:
+                        chunk_file.write(chunk)
+                    self.output_window.append(f"Splitting {file_path}: part {i+1}/{num_parts} complete")
+                    i += 1
+            # Remove the old unsplit PKG
+            os.remove(file_path)
+
+    def split_ps3_iso(self, file_path):
+        file_size = os.path.getsize(file_path)
+        if file_size >= 4294967295:
+            chunk_size = 4294967295  # Size of each chunk in bytes (4GB)
+            num_parts = -(-file_size // chunk_size)  # Calculate the number of parts
+            with open(file_path, 'rb') as f:
+                i = 0  # Counter for naming the chunks
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:  # End of file
+                        break
+                    with open(f"{os.path.splitext(file_path)[0]}.iso.{str(i)}", 'wb') as chunk_file:
+                        chunk_file.write(chunk)
+                    self.output_window.append(f"Splitting {file_path}: part {i+1}/{num_parts} complete")
+                    i += 1
+
+    # Function to unzip a file with progress
+    def unzip_file(self, zip_path, output_path, output_window):
+        extracted_files = []
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for i, file in enumerate(zip_ref.infolist(), start=1):
+                # Split the filename into name and extension
+                name, ext = os.path.splitext(file.filename)
+
+                # Check if the filename is longer than 32 characters
+                if len(name) > 32:
+                    # If it is, truncate it and add '...'
+                    filename = name[:32-len(ext)] + '..' + ext
+                else:
+                    # If it's not, use the filename as is
+                    filename = file.filename
+
+                output_window.write(f"\nExtracting {filename} (program may look frozen, please wait!)")
+                zip_ref.extract(file, output_path)
+                extracted_files.append(file.filename)
+                QApplication.processEvents()
+        return extracted_files
+
     def download_ps3dec(self, ps3decButton, textbox):
         urllib.request.urlretrieve("https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe", "ps3dec.exe")
         self.ps3dec_binary = os.path.join(os.getcwd(), "ps3dec.exe")
@@ -605,52 +664,6 @@ class GUIDownloader(QWidget):
         self.ps3dec_binary = './ps3dec' if sys.platform != "Windows" else './ps3dec.exe'
         self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
         textbox.setText(self.ps3dec_binary)
-
-    def download_splitps3iso(self, splitps3isoButton, textbox):
-        # Create a new directory called 'workdir'
-        os.makedirs('workdir', exist_ok=True)
-        os.chdir('workdir')
-
-        if platform.system() == 'Windows':
-            url = "https://github.com/bucanero/ps3iso-utils/releases/download/277db7de/ps3iso-277db7de-Win64.zip"
-        elif platform.system() == 'Linux':
-            url = "https://github.com/bucanero/ps3iso-utils/releases/download/277db7de/ps3iso-277db7de-ubuntu.zip"
-        elif platform.system() == 'Darwin':
-            url = "https://github.com/bucanero/ps3iso-utils/releases/download/277db7de/ps3iso-277db7de-macos.zip"
-
-        urllib.request.urlretrieve(url, "ps3isotools.zip")
-        with zipfile.ZipFile("ps3isotools.zip", 'r') as zip_ref:
-            zip_ref.extractall('.')
-        os.remove("ps3isotools.zip")  # delete the zip file
-
-        # Extract the tar.gz file
-        with tarfile.open("build.tar.gz", 'r:gz') as tar_ref:
-            tar_ref.extractall('.')
-        os.remove("build.tar.gz")  # delete the tar.gz file
-
-        # Rename the splitps3iso directory
-        os.rename("splitps3iso", "splitps3iso-dir")
-
-        # Move the splitps3iso binary
-        binary_name = "splitps3iso.exe" if platform.system() == 'Windows' else "splitps3iso"
-        shutil.move(f"splitps3iso-dir/{binary_name}", "..")
-
-        # Change back to the original directory
-        os.chdir('..')
-
-        # Set binary path
-        self.splitps3iso_binary = os.path.join(os.getcwd(), binary_name)
-        self.settings.setValue('splitps3iso_binary', self.splitps3iso_binary)
-
-        # Delete the 'workdir' directory
-        shutil.rmtree('workdir')
-
-        # Update the button
-        splitps3isoButton.setText('splitps3iso downloaded! ✅')
-        splitps3isoButton.setEnabled(False)
-        self.splitps3iso_binary = './splitps3iso' if sys.platform != "Windows" else './splitps3iso.exe'
-        self.settings.setValue('splitps3iso_binary', self.splitps3iso_binary)
-        textbox.setText(self.splitps3iso_binary)
 
     def settings_welcome_dialog(self, title, close_button_text, add_iso_list_section=False, welcome_text=None):
         dialog = QDialog()
@@ -696,24 +709,6 @@ class GUIDownloader(QWidget):
 
         create_binary_section("PS3Dec:", ps3decButton, ps3decSelectButton, ps3decPathTextbox)
 
-        # splitps3iso section
-        splitps3isoButton = QPushButton('Download splitps3iso')
-        splitps3isoSelectButton = QPushButton('Choose splitps3iso Binary')
-        splitps3isoPathTextbox = QLineEdit(self.splitps3iso_binary)  # Initialize with existing path if available
-
-        # Check if splitps3iso is detected
-        if os.path.isfile("splitps3iso") or os.path.isfile("splitps3iso.exe"):
-            splitps3isoButton.setText('splitps3iso detected! ✅')
-            splitps3isoButton.setEnabled(False)
-
-        # Connect download button to the download_splitps3iso method
-        splitps3isoButton.clicked.connect(lambda: self.download_splitps3iso(splitps3isoButton, splitps3isoPathTextbox))
-
-        # Connect select button to the open_file_dialog_splitps3iso method
-        splitps3isoSelectButton.clicked.connect(lambda: self.open_file_dialog_splitps3iso(splitps3isoPathTextbox))
-
-        create_binary_section("splitps3iso:", splitps3isoButton, splitps3isoSelectButton, splitps3isoPathTextbox)
-
         # ISO List section
         if add_iso_list_section:
             iso_list_button = QPushButton('Update ISO List')
@@ -732,11 +727,12 @@ class GUIDownloader(QWidget):
         self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
 
     def first_startup(self):
-        welcome_text = "Welcome! The script can attempt to grab PS3Dec and splitps3iso automatically or you can set them manually"
+        welcome_text = "Welcome! The script can attempt to grab PS3Dec automatically or you can set it manually"
         self.settings_welcome_dialog("Welcome!", "Continue", welcome_text=welcome_text)
 
     def update_iso_list(self):
-        self.get_iso_list_thread.start()
+        self.get_ps3iso_list_thread.start()
+        self.get_psn_list_thread.start()
 
     def open_file_dialog_ps3dec(self, textbox):
         options = QFileDialog.Options()
@@ -745,15 +741,6 @@ class GUIDownloader(QWidget):
         if fileName:
             self.ps3dec_binary = fileName
             self.settings.setValue('ps3dec_binary', fileName)
-            textbox.setText(fileName)  # Update the textbox with the new path
-
-    def open_file_dialog_splitps3iso(self, textbox):
-        options = QFileDialog.Options()
-        options |= QFileDialog.ReadOnly
-        fileName, _ = QFileDialog.getOpenFileName(self, "Select splitps3iso binary", "", "All Files (*);;Executable Files (*.exe)", options=options)
-        if fileName:
-            self.splitps3iso_binary = fileName
-            self.settings.setValue('splitps3iso_binary', fileName)
             textbox.setText(fileName)  # Update the textbox with the new path
 
     def update_results(self):
