@@ -10,6 +10,11 @@
 # ignore logs
 log/
 
+# ignore pyinstaller files
+build/
+dist/
+*.spec
+
 # ignore binaries
 ps3dec*
 splitps3iso*

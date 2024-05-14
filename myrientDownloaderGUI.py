@@ -2,25 +2,26 @@ import os
 import subprocess
 import zipfile
 import sys
-import requests
-import traceback
 import platform
-import urllib.request
-import tarfile
 import shutil
 import multiprocessing
 import urllib
+import urllib.request
+import urllib.parse
 import json
 import time
-import aiohttp, asyncio
-import urllib.parse
+import asyncio
+from pathlib import Path
 from urllib.parse import unquote
+import requests
+import aiohttp
 from bs4 import BeautifulSoup
-from PyQt5.QtWidgets import QApplication, QGridLayout, QGroupBox, QWidget, QVBoxLayout, QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, QFileDialog, QMessageBox, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar, QTabWidget
+from PyQt5.QtWidgets import QApplication, QGridLayout, QGroupBox, QWidget, QVBoxLayout, \
+    QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, \
+    QFileDialog, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar, \
+    QTabWidget
 from PyQt5.QtCore import QThread, pyqtSignal, QSettings, QEventLoop
 from PyQt5.QtGui import QTextCursor
-from threading import Lock
-from pathlib import Path
 
 class GetPS3ISOListThread(QThread):
     signal = pyqtSignal('PyQt_PyObject')
@@ -33,7 +34,6 @@ class GetPS3ISOListThread(QThread):
         if os.path.exists('ps3isolist.json'):
             with open('ps3isolist.json', 'r') as file:
                 ps3iso_list = json.load(file)
-        
         if not ps3iso_list:
             url = "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/"
             response = requests.get(url)
@@ -66,6 +66,63 @@ class GetPS3PSNSoftwareListThread(QThread):
 
         self.signal.emit(psn_list)
 
+class SplitPkgThread(QThread):
+    progress = pyqtSignal(str)
+    status = pyqtSignal(bool)
+
+    def __init__(self, file_path):
+        QThread.__init__(self)
+        self.file_path = file_path
+
+    def run(self):
+        file_size = os.path.getsize(self.file_path)
+        if file_size < 4294967295:
+            self.status.emit(False)
+            return
+        else:
+            chunk_size = 4294967295
+            num_parts = -(-file_size // chunk_size)
+            with open(self.file_path, 'rb') as f:
+                i = 0
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    with open(f"{Path(self.file_path).stem}.pkg.666{str(i).zfill(2)}", 'wb') as chunk_file:
+                        chunk_file.write(chunk)
+                    self.progress.emit(f"Splitting {self.file_path}: part {i+1}/{num_parts} complete")
+                    i += 1
+            os.remove(self.file_path)
+            self.status.emit(True)
+
+class SplitIsoThread(QThread):
+    progress = pyqtSignal(str)
+    status = pyqtSignal(bool)
+
+    def __init__(self, file_path):
+        QThread.__init__(self)
+        self.file_path = file_path
+
+    def run(self):
+        file_size = os.path.getsize(self.file_path)
+        if file_size < 4294967295:
+            self.status.emit(False)
+            return
+        else:
+            chunk_size = 4294967295
+            num_parts = -(-file_size // chunk_size)
+            with open(self.file_path, 'rb') as f:
+                i = 0
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    with open(f"{os.path.splitext(self.file_path)[0]}.iso.{str(i)}", 'wb') as chunk_file:
+                        chunk_file.write(chunk)
+                    self.progress.emit(f"Splitting {self.file_path}: part {i+1}/{num_parts} complete")
+                    i += 1
+            self.status.emit(True)
+
 class OutputWindow(QTextEdit):
     def __init__(self, *args, **kwargs):
         super(OutputWindow, self).__init__(*args, **kwargs)
@@ -83,22 +140,57 @@ class OutputWindow(QTextEdit):
         pass
 
 # Function to run a command and check its success
-def run_command(command, output_window):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE)
-    
-    # If on Windows, send a newline character to ps3dec's standard input
-    if platform.system() == 'Windows':
-        process.stdin.write(b'\n')
-        process.stdin.flush()
+class CommandRunner(QThread):
+    output_signal = pyqtSignal(str)
+
+    def __init__(self, command):
+        super().__init__()
+        self.command = command
+
+    def run(self):
+        process = subprocess.Popen(self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE)
         
-    for line in iter(process.stdout.readline, b''):
-        # Strip newline characters from the end of the line before appending
-        output_window.append(line.decode().rstrip('\n'))
-        QApplication.processEvents()
-    process.stdout.close()
-    return_code = process.wait()
-    if return_code:
-        raise subprocess.CalledProcessError(return_code, command)
+        # If on Windows, send a newline character to ps3dec's standard input
+        if platform.system() == 'Windows':
+            process.stdin.write(b'\n')
+            process.stdin.flush()
+            
+        for line in iter(process.stdout.readline, b''):
+            # Strip newline characters from the end of the line before appending
+            self.output_signal.emit(line.decode().rstrip('\n'))
+        process.stdout.close()
+        return_code = process.wait()
+        if return_code:
+            raise subprocess.CalledProcessError(return_code, self.command)
+
+class UnzipRunner(QThread):
+    output_signal = pyqtSignal(str)
+    result_signal = pyqtSignal(list)
+
+    def __init__(self, zip_path, output_path):
+        super().__init__()
+        self.zip_path = zip_path
+        self.output_path = output_path
+        self.extracted_files = []  # Make extracted_files an instance variable
+
+    def run(self):
+        with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
+            for i, file in enumerate(zip_ref.infolist(), start=1):
+                # Split the filename into name and extension
+                name, ext = os.path.splitext(file.filename)
+
+                # Check if the filename is longer than 32 characters
+                if len(name) > 32:
+                    # If it is, truncate it and add '...'
+                    filename = name[:32-len(ext)] + '..' + ext
+                else:
+                    # If it's not, use the filename as is
+                    filename = file.filename
+
+                print(f"Extracting {filename} (program may look frozen, please wait!)")
+                zip_ref.extract(file, self.output_path)
+                self.extracted_files.append(file.filename)  # Update the instance variable
+        self.result_signal.emit(self.extracted_files)
 
 class DownloadThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -432,7 +524,7 @@ class GUIDownloader(QWidget):
         # Check if the selected ISO already exists
         if not os.path.isfile(base_name):
             # Download the selected ISO
-            self.output_window.append(f"({queue_position}) Download started for {base_name}...\n")
+            self.output_window.append(f"({queue_position}) Download started for {base_name}...")
             self.progress_bar.reset()  # Reset the progress bar to 0
             self.download_thread = DownloadThread(f"{url}/{selected_iso_encoded}", selected_iso)
             self.download_thread.progress_signal.connect(self.progress_bar.setValue)
@@ -455,7 +547,10 @@ class GUIDownloader(QWidget):
         self.downloadhelper(selected_iso, queue_position, operation, url)
 
         # Unzip the ISO and delete the ZIP file
-        self.unzip_file(selected_iso, '.', self.output_window)
+        runner = UnzipRunner(selected_iso, '.')
+        runner.output_signal.connect(self.output_window.append)
+        runner.start()
+        runner.wait()  # Wait for the unzip operation to complete
         os.remove(selected_iso)
 
         # Check if the corresponding dkey file already exists
@@ -488,25 +583,29 @@ class GUIDownloader(QWidget):
         if 'Decrypt' in operation:
             if platform.system() == 'Windows':
                 thread_count = multiprocessing.cpu_count() // 2
-                run_command([f"{self.ps3dec_binary}", "--iso", f"{os.path.splitext(selected_iso)[0]}.iso", "--dk", key, "--tc", str(thread_count)],  self.output_window)
-                # Rename the decrypted ISO file to remove '_decrypted'
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso_decrypted.iso", f"{os.path.splitext(selected_iso)[0]}.iso")
+                command = [f"{self.ps3dec_binary}", "--iso", f"{os.path.splitext(selected_iso)[0]}.iso", "--dk", key, "--tc", str(thread_count)]
             else:
-                run_command([self.ps3dec_binary, 'd', 'key', key, f"{os.path.splitext(selected_iso)[0]}.iso"],  self.output_window)
-                # Rename the original ISO file to .iso.enc
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
+                command = [self.ps3dec_binary, 'd', 'key', key, f"{os.path.splitext(selected_iso)[0]}.iso"]
+
+            runner = CommandRunner(command)
+            runner.output_signal.connect(print)
+            runner.start()
+            runner.wait()  # Wait for the command to complete
+
+            # Rename the original ISO file to .iso.enc
+            os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
+            os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
 
         # Split processed .iso file if splitting is enabled
         self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
         if 'Split' in operation:
-            # Call the split_ps3_iso function
-            self.split_ps3_iso(f"{os.path.splitext(selected_iso)[0]}.iso")
-            self.output_window.append(f"({queue_position}) split_ps3iso completed for {base_name}")
-            # Delete the .iso file if the 'Keep unsplit decrypted ISO' checkbox is unchecked
-            if not self.keep_unsplit_dec_checkbox.isChecked():
-                os.remove(f"{os.path.splitext(selected_iso)[0]}.iso")
+            split_iso_thread = SplitIsoThread(f"{os.path.splitext(selected_iso)[0]}.iso")
+            split_iso_thread.progress.connect(print)
+            split_iso_thread.status.connect(lambda status: os.remove(f"{os.path.splitext(selected_iso)[0]}.iso") if status and not self.keep_unsplit_dec_checkbox.isChecked() else None)
+            split_iso_thread.start()
+            split_iso_thread.wait()  # Wait for the thread to finish
+            if split_iso_thread.isFinished():
+                self.output_window.append(f"({queue_position}) split_ps3iso completed for {base_name}")
 
         # Delete the .dkey file if the 'Keep dkey file' checkbox is unchecked
         if not self.keep_dkey_checkbox.isChecked():
@@ -518,7 +617,7 @@ class GUIDownloader(QWidget):
 
         self.queue_list.takeItem(0)
 
-        self.output_window.append(f"({queue_position}) {base_name} ready!")
+        self.output_window.append(f"({queue_position}) {base_name} complete!")
 
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
@@ -530,21 +629,26 @@ class GUIDownloader(QWidget):
         self.downloadhelper(selected_iso, queue_position, operation, url)
 
         # Unzip the ISO and delete the ZIP file
-        extracted_files = self.unzip_file(selected_iso, '.', self.output_window)
+        runner = UnzipRunner(selected_iso, '.')
+        runner.output_signal.connect(self.output_window.append)
+        runner.start()
+        runner.wait()  # Wait for the unzip operation to complete
         os.remove(selected_iso)
 
         # Rename the extracted .pkg file to the original name of the zip file
-        for file in extracted_files:
+        for file in runner.extracted_files:  # Access the instance variable here
             if file.endswith('.pkg'):
                 new_file_path = f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}"
                 os.rename(file, new_file_path)
                 # If the 'split PKG' checkbox is checked, split the PKG file
                 if self.split_pkg_checkbox.isChecked():
-                    self.split_pkg(new_file_path)
+                    split_pkg_thread = SplitPkgThread(new_file_path)
+                    split_pkg_thread.progress.connect(print)
+                    split_pkg_thread.status.connect(lambda status: self.output_window.append(f"({queue_position}) split_pkg completed for {base_name}") if status else None)
+                    split_pkg_thread.start()
+                    split_pkg_thread.wait()  # Wait for the thread to finish
 
         self.queue_list.takeItem(0)
-
-
         self.output_window.append(f"({queue_position}) {base_name} ready!")
 
         # If there are more items in the queue, start the next download
@@ -596,62 +700,6 @@ class GUIDownloader(QWidget):
                 # On other platforms, just check the filename (case insensitive)
                 return filename.lower() == binary_name.lower()
         return False
-
-    def split_pkg(self, file_path):
-        file_size = os.path.getsize(file_path)
-        if file_size >= 4294967295:
-            chunk_size = 4294967295
-            num_parts = -(-file_size // chunk_size)  # Calculate the number of parts
-            with open(file_path, 'rb') as f:
-                i = 0
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                    with open(f"{Path(file_path).stem}.pkg.666{str(i).zfill(2)}", 'wb') as chunk_file:
-                        chunk_file.write(chunk)
-                    self.output_window.append(f"Splitting {file_path}: part {i+1}/{num_parts} complete")
-                    i += 1
-            # Remove the old unsplit PKG
-            os.remove(file_path)
-
-    def split_ps3_iso(self, file_path):
-        file_size = os.path.getsize(file_path)
-        if file_size >= 4294967295:
-            chunk_size = 4294967295  # Size of each chunk in bytes (4GB)
-            num_parts = -(-file_size // chunk_size)  # Calculate the number of parts
-            with open(file_path, 'rb') as f:
-                i = 0  # Counter for naming the chunks
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:  # End of file
-                        break
-                    with open(f"{os.path.splitext(file_path)[0]}.iso.{str(i)}", 'wb') as chunk_file:
-                        chunk_file.write(chunk)
-                    self.output_window.append(f"Splitting {file_path}: part {i+1}/{num_parts} complete")
-                    i += 1
-
-    # Function to unzip a file with progress
-    def unzip_file(self, zip_path, output_path, output_window):
-        extracted_files = []
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            for i, file in enumerate(zip_ref.infolist(), start=1):
-                # Split the filename into name and extension
-                name, ext = os.path.splitext(file.filename)
-
-                # Check if the filename is longer than 32 characters
-                if len(name) > 32:
-                    # If it is, truncate it and add '...'
-                    filename = name[:32-len(ext)] + '..' + ext
-                else:
-                    # If it's not, use the filename as is
-                    filename = file.filename
-
-                output_window.write(f"\nExtracting {filename} (program may look frozen, please wait!)")
-                zip_ref.extract(file, output_path)
-                extracted_files.append(file.filename)
-                QApplication.processEvents()
-        return extracted_files
 
     def download_ps3dec(self, ps3decButton, textbox):
         urllib.request.urlretrieve("https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe", "ps3dec.exe")
@@ -780,9 +828,6 @@ class GUIDownloader(QWidget):
             self.keep_enc_checkbox.show()
 
 if __name__ == '__main__':
-    try:
-        app = QApplication(sys.argv)
-        ex = GUIDownloader()
-        sys.exit(app.exec_())
-    except Exception:
-        print(traceback.format_exc())
+    app = QApplication(sys.argv)
+    ex = GUIDownloader()
+    sys.exit(app.exec_())
