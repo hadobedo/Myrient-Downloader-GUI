@@ -7,15 +7,19 @@ Features:
 - User-friendly setup (prompts users to download PS3Dec binary automatically)
 - Cross platform, should work on Windows and Linux, may work on macOS
 
-Installation and Usage:
+Usage:
+1. [Download the latest release for your platform](https://github.com/hadobedo/myrientgrabber-ps3/releases/latest)
+2. Run the exe, download/specify location of PS3Dec and you're good to go
+
+If you'd like to run this script as a .py file instead of a binary:
 1. Clone repo & cd into folder `git clone https://github.com/hadobedo/myrientgrabber-ps3/ && cd myrientgrabber-ps3/`
 2. Install the requirements (if on Arch Linux see below) `pip install -r requirements.txt`
 3. Run the script! `python3 ./myrientDownloaderGUI.py`
 
-~~Alternatively grab a precompiled EXE or Linux binary from the releases tab~~ (nvm Windows Defender saw my pyinstaller script as trojan, will try again after cleaning up code(?) )
+~~Alternatively grab a precompiled EXE or Linux binary from the releases tab (nvm Windows Defender saw my pyinstaller script as trojan, will try again after cleaning up code(?) )
 
 If you're on a Arch Linux where the Python environment is externally managed you can install requirements like so:
-`sudo pacman -S python-requests python-beautifulsoup4 python-pyqt5 python-tqdm`
+`sudo pacman -S python-aiohttp python-beautifulsoup4 python-pyqt5 python-requests`
 
 If you're on Arch Linux and you need PS3Dec you can [get it from the aur](https://aur.archlinux.org/packages/ps3dec-git)
 
