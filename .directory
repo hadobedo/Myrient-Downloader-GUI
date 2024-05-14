@@ -1,7 +1,6 @@
 [Dolphin]
-SortOrder=1
-SortRole=modificationtime
-Timestamp=2024,5,14,1,50,53.612
+SortRole=size
+Timestamp=2024,5,14,2,24,27.019
 Version=4
 ViewMode=1
 

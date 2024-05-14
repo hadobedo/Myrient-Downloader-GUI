@@ -594,7 +594,12 @@ class GUIDownloader(QWidget):
 
             # Rename the original ISO file to .iso.enc
             os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
-            os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
+
+            # Check the platform and rename the decrypted file accordingly
+            if platform.system() == 'Windows':
+                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso_decrypted.iso", f"{os.path.splitext(selected_iso)[0]}.iso")
+            else:
+                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
 
         # Split processed .iso file if splitting is enabled
         self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
