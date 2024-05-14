@@ -36,7 +36,7 @@ TODO:
 
 screenshots:
 ![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/76519cb9-38ce-4423-8591-a9f3f9d318cd)
-![Screenshot_20240511_032153](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/a2be69ad-424f-45da-a6b3-db06519d65a4)
+![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/4c41ef9c-60bd-4a4a-a409-36f8ca854f69)
 
 
 use at your own risk etc etc
