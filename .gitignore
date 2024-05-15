@@ -4,8 +4,9 @@
 # ignore ini
 *.ini
 
-# ignore .vscode
+# ignore .vscode, .directory
 .vscode/
+.directory
 
 # ignore logs
 log/
@@ -26,3 +27,7 @@ splitps3iso*
 *.pkg
 *.pkg.*
 *.rap
+
+# ignore game folders
+MyrientDownloads/
+processing/

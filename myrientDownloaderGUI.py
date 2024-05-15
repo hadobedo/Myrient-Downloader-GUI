@@ -4,12 +4,15 @@ import zipfile
 import sys
 import platform
 import shutil
+import glob
 import multiprocessing
 import urllib
 import urllib.request
 import urllib.parse
 import json
+import difflib
 import time
+import threading
 import asyncio
 from pathlib import Path
 from urllib.parse import unquote
@@ -23,48 +26,27 @@ from PyQt5.QtWidgets import QApplication, QGridLayout, QGroupBox, QWidget, QVBox
 from PyQt5.QtCore import QThread, pyqtSignal, QSettings, QEventLoop
 from PyQt5.QtGui import QTextCursor
 
-class GetPS3ISOListThread(QThread):
+class GetSoftwareListThread(QThread):
     signal = pyqtSignal('PyQt_PyObject')
 
-    def __init__(self):
+    def __init__(self, url, json_file):
         QThread.__init__(self)
+        self.url = url
+        self.json_file = json_file
 
     def run(self):
-        ps3iso_list = []
-        if os.path.exists('ps3isolist.json'):
-            with open('ps3isolist.json', 'r') as file:
-                ps3iso_list = json.load(file)
-        if not ps3iso_list:
-            url = "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/"
-            response = requests.get(url)
+        iso_list = []
+        if os.path.exists(self.json_file):
+            with open(self.json_file, 'r') as file:
+                iso_list = json.load(file)
+        if not iso_list:
+            response = requests.get(self.url)
             soup = BeautifulSoup(response.text, 'html.parser')
-            ps3iso_list = [unquote(link.get('href')) for link in soup.find_all('a') if link.get('href').endswith('.zip')]
-            with open('ps3isolist.json', 'w') as file:
-                json.dump(ps3iso_list, file)
+            iso_list = [unquote(link.get('href')) for link in soup.find_all('a') if link.get('href').endswith('.zip')]
+            with open(self.json_file, 'w') as file:
+                json.dump(iso_list, file)
 
-        self.signal.emit(ps3iso_list)
-
-class GetPS3PSNSoftwareListThread(QThread):
-    signal = pyqtSignal('PyQt_PyObject')
-
-    def __init__(self):
-        QThread.__init__(self)
-
-    def run(self):
-        psn_list = []
-        if os.path.exists('psnlist.json'):
-            with open('psnlist.json', 'r') as file:
-                psn_list = json.load(file)
-        
-        if not psn_list:
-            url = "https://myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
-            response = requests.get(url)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            psn_list = [unquote(link.get('href')) for link in soup.find_all('a') if link.get('href').endswith('.zip')]
-            with open('psnlist.json', 'w') as file:
-                json.dump(psn_list, file)
-
-        self.signal.emit(psn_list)
+        self.signal.emit(iso_list)
 
 class SplitPkgThread(QThread):
     progress = pyqtSignal(str)
@@ -90,7 +72,7 @@ class SplitPkgThread(QThread):
                         break
                     with open(f"{Path(self.file_path).stem}.pkg.666{str(i).zfill(2)}", 'wb') as chunk_file:
                         chunk_file.write(chunk)
-                    self.progress.emit(f"Splitting {self.file_path}: part {i+1}/{num_parts} complete")
+                    print(f"Splitting {self.file_path}: part {i+1}/{num_parts} complete")
                     i += 1
             os.remove(self.file_path)
             self.status.emit(True)
@@ -119,9 +101,10 @@ class SplitIsoThread(QThread):
                         break
                     with open(f"{os.path.splitext(self.file_path)[0]}.iso.{str(i)}", 'wb') as chunk_file:
                         chunk_file.write(chunk)
-                    self.progress.emit(f"Splitting {self.file_path}: part {i+1}/{num_parts} complete")
+                    print(f"Splitting {self.file_path}: part {i+1}/{num_parts} complete")  # Print to console
                     i += 1
             self.status.emit(True)
+
 
 class OutputWindow(QTextEdit):
     def __init__(self, *args, **kwargs):
@@ -141,31 +124,34 @@ class OutputWindow(QTextEdit):
 
 # Function to run a command and check its success
 class CommandRunner(QThread):
-    output_signal = pyqtSignal(str)
-
     def __init__(self, command):
         super().__init__()
         self.command = command
 
     def run(self):
-        process = subprocess.Popen(self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE)
+        process = subprocess.Popen(self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, bufsize=1, universal_newlines=True)
         
         # If on Windows, send a newline character to ps3dec's standard input
         if platform.system() == 'Windows':
-            process.stdin.write(b'\n')
+            process.stdin.write('\n')
             process.stdin.flush()
-            
-        for line in iter(process.stdout.readline, b''):
-            # Strip newline characters from the end of the line before appending
-            self.output_signal.emit(line.decode().rstrip('\n'))
-        process.stdout.close()
-        return_code = process.wait()
-        if return_code:
-            raise subprocess.CalledProcessError(return_code, self.command)
+
+        # Use a separate thread to read the output
+        def reader_thread(process):
+            for line in iter(process.stdout.readline, ''):
+                print(line.rstrip('\n'))  # Emit the output signal
+                QApplication.processEvents()  # Process GUI events
+
+        thread = threading.Thread(target=reader_thread, args=(process,))
+        thread.start()
+        process.wait()
+        thread.join()  # Wait for the reader thread to finish
+
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, self.command)
 
 class UnzipRunner(QThread):
-    output_signal = pyqtSignal(str)
-    result_signal = pyqtSignal(list)
+    progress_signal = pyqtSignal(int)
 
     def __init__(self, zip_path, output_path):
         super().__init__()
@@ -175,22 +161,23 @@ class UnzipRunner(QThread):
 
     def run(self):
         with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
-            for i, file in enumerate(zip_ref.infolist(), start=1):
-                # Split the filename into name and extension
-                name, ext = os.path.splitext(file.filename)
+            total_size = sum([info.file_size for info in zip_ref.infolist()])
+            extracted_size = 0
 
-                # Check if the filename is longer than 32 characters
-                if len(name) > 32:
-                    # If it is, truncate it and add '...'
-                    filename = name[:32-len(ext)] + '..' + ext
-                else:
-                    # If it's not, use the filename as is
-                    filename = file.filename
+            for info in zip_ref.infolist():
+                with zip_ref.open(info, 'r') as file_in:
+                    file_out_path = os.path.join(self.output_path, os.path.basename(info.filename))  # Use os.path.basename to ignore the directory structure in the zip file
+                    with open(file_out_path, 'wb') as file_out:
+                        while True:
+                            chunk = file_in.read(8192)
+                            if not chunk:
+                                break
+                            file_out.write(chunk)
+                            extracted_size += len(chunk)
+                            self.progress_signal.emit(int((extracted_size / total_size) * 100))
+                            QApplication.processEvents()
+                    self.extracted_files.append(file_out_path)  # Store the path of the extracted file
 
-                print(f"Extracting {filename} (program may look frozen, please wait!)")
-                zip_ref.extract(file, self.output_path)
-                self.extracted_files.append(file.filename)  # Update the instance variable
-        self.result_signal.emit(self.extracted_files)
 
 class DownloadThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -295,6 +282,18 @@ class GUIDownloader(QWidget):
         # Load the user's settings
         self.settings = QSettings('./myrientDownloaderGUI.ini', QSettings.IniFormat)
         self.ps3dec_binary = self.settings.value('ps3dec_binary', '')
+        self.ps3iso_dir = self.settings.value('ps3iso_dir', 'MyrientDownloads/PS3ISO')
+        self.psn_pkg_dir = self.settings.value('psn_pkg_dir', 'MyrientDownloads/packages')
+        self.psn_rap_dir = self.settings.value('psn_rap_dir', 'MyrientDownloads/exdata')
+        self.ps2iso_dir = self.settings.value('ps2iso_dir', 'MyrientDownloads/PS2ISO')
+        self.processing_dir = 'processing'
+
+        # Create directories if they do not exist
+        os.makedirs(self.ps3iso_dir, exist_ok=True)
+        os.makedirs(self.psn_pkg_dir, exist_ok=True)
+        os.makedirs(self.psn_rap_dir, exist_ok=True)
+        os.makedirs(self.ps2iso_dir, exist_ok=True)
+        os.makedirs(self.processing_dir, exist_ok=True)
 
         # Check if the saved binary paths exist
         if not os.path.isfile(self.ps3dec_binary):
@@ -315,16 +314,22 @@ class GUIDownloader(QWidget):
 
         self.ps3iso_list = ['Loading from https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/...']
         self.psn_list = ['Loading from https://myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)...']
+        self.ps2iso_list = ['Loading from https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202/...']
 
         # Get list of ISOs from the HTTPS directory
-        self.get_ps3iso_list_thread = GetPS3ISOListThread()
+        self.get_ps3iso_list_thread = GetSoftwareListThread("https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/", 'ps3isolist.json')
         self.get_ps3iso_list_thread.signal.connect(self.set_ps3iso_list)
         self.get_ps3iso_list_thread.start()
 
         # Get list of PSN software from the HTTPS directory
-        self.get_psn_list_thread = GetPS3PSNSoftwareListThread()
+        self.get_psn_list_thread = GetSoftwareListThread("https://myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)", 'psnlist.json')
         self.get_psn_list_thread.signal.connect(self.set_psn_list)
         self.get_psn_list_thread.start()
+
+        # Get list of PS2 ISOs from the HTTPS directory
+        self.get_ps2iso_list_thread = GetSoftwareListThread("https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202/", 'ps2isolist.json')
+        self.get_ps2iso_list_thread.signal.connect(self.set_ps2iso_list)
+        self.get_ps2iso_list_thread.start()
 
         # For displaying queue position in OutputWindow
         self.processed_items = 0 
@@ -347,16 +352,24 @@ class GUIDownloader(QWidget):
 
         # Create a list for results (software list)
         self.result_list = QTabWidget(self)
-        self.result_list.addTab(QListWidget(), "ISOs")
-        self.result_list.addTab(QListWidget(), "PSN")
+        self.result_list.addTab(QListWidget(), "PS3 ISOs")
+        self.result_list.addTab(QListWidget(), "PSN PKGs")
+        self.result_list.addTab(QListWidget(), "PS2 ISOs")
         self.result_list.widget(0).addItems(self.ps3iso_list)
         self.result_list.widget(1).addItems(self.psn_list)
+        self.result_list.widget(2).addItems(self.ps2iso_list)
         self.result_list.currentChanged.connect(self.update_add_to_queue_button)
         vbox.addWidget(self.result_list)
 
         # Connect the itemSelectionChanged signal to the update_add_to_queue_button method
         self.result_list.widget(0).itemSelectionChanged.connect(self.update_add_to_queue_button)
         self.result_list.widget(1).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(2).itemSelectionChanged.connect(self.update_add_to_queue_button)
+
+        # Allow selecting multiple items
+        self.result_list.widget(0).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(1).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(2).setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         # Create a horizontal box layout
         hbox = QHBoxLayout()
@@ -396,31 +409,41 @@ class GUIDownloader(QWidget):
         pkg_options_header = QLabel('PKG Settings')
         grid.addWidget(pkg_options_header, 0, 1)
 
-        # Create a dropdown menu for selecting the operation
-        self.operation_dropdown = QComboBox(self)
-        self.operation_dropdown.addItems(['Decrypt and Split', 'Decrypt Only', 'Download Only'])
-        self.operation_dropdown.currentTextChanged.connect(self.update_checkboxes)
-        grid.addWidget(self.operation_dropdown, 1, 0)
-
-        # Create a checkbox for splitting the PKG file
-        self.split_pkg_checkbox = QCheckBox('Split PKG', self)
-        self.split_pkg_checkbox.setChecked(False)
-        grid.addWidget(self.split_pkg_checkbox, 1, 1)
+        # Create a checkbox for decrypting the file
+        self.decrypt_checkbox = QCheckBox('Decrypt (if necessary)', self)
+        self.decrypt_checkbox.setChecked(True)  # Enable checkbox by default
+        grid.addWidget(self.decrypt_checkbox, 1, 0)
 
         # Create a checkbox for keeping or deleting the encrypted ISO file
         self.keep_enc_checkbox = QCheckBox('Keep encrypted ISO', self)
         self.keep_enc_checkbox.setChecked(False)
         grid.addWidget(self.keep_enc_checkbox, 2, 0)
 
+        # Create a checkbox for splitting the file for FAT32 filesystems
+        self.split_checkbox = QCheckBox('Split for FAT32 (if > 4GB)', self)
+        self.split_checkbox.setChecked(True)  # Enable checkbox by default
+        grid.addWidget(self.split_checkbox, 3, 0)
+
         # Create a checkbox for keeping or deleting the unsplit decrypted ISO file
-        self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit decrypted ISO', self)
+        self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit ISO', self)
         self.keep_unsplit_dec_checkbox.setChecked(False)
-        grid.addWidget(self.keep_unsplit_dec_checkbox, 3, 0)
+        grid.addWidget(self.keep_unsplit_dec_checkbox, 4, 0)
+
+        # Create a checkbox for splitting the PKG file
+        self.split_pkg_checkbox = QCheckBox('Split PKG', self)
+        self.split_pkg_checkbox.setChecked(False)
+        grid.addWidget(self.split_pkg_checkbox, 1, 1)
 
         # Create a checkbox for keeping or deleting the dkey file
         self.keep_dkey_checkbox = QCheckBox('Keep dkey file', self)
         self.keep_dkey_checkbox.setChecked(False)
-        grid.addWidget(self.keep_dkey_checkbox, 4, 0)
+        grid.addWidget(self.keep_dkey_checkbox, 5, 0)
+
+        # Connect the stateChanged signal of the decrypt_checkbox to a slot that shows or hides the keep_enc_checkbox
+        self.decrypt_checkbox.stateChanged.connect(self.keep_enc_checkbox.setVisible)
+
+        # Connect the stateChanged signal of the split_checkbox to a slot that shows or hides the keep_unsplit_dec_checkbox
+        self.split_checkbox.stateChanged.connect(self.keep_unsplit_dec_checkbox.setVisible)
 
         # Create a group box to contain the grid layout
         group_box = QGroupBox()
@@ -474,7 +497,8 @@ class GUIDownloader(QWidget):
         self.settings_button.setEnabled(False)
         self.add_to_queue_button.setEnabled(False)
         self.remove_from_queue_button.setEnabled(False)
-        self.operation_dropdown.setEnabled(False)
+        self.decrypt_checkbox.setEnabled(False)
+        self.split_checkbox.setEnabled(False)
         self.keep_dkey_checkbox.setEnabled(False)
         self.keep_enc_checkbox.setEnabled(False)
         self.keep_unsplit_dec_checkbox.setEnabled(False)
@@ -484,7 +508,11 @@ class GUIDownloader(QWidget):
 
         if self.queue_list.count() > 0:
             item_text = self.queue_list.item(0).text()
-            operation = self.operation_dropdown.currentText()  # Get the current operation from the dropdown
+            operation = []
+            if self.decrypt_checkbox.isChecked():
+                operation.append('Decrypt')
+            if self.split_checkbox.isChecked():
+                operation.append('Split')
 
             # Get the total number of items in the queue
             if self.processed_items == 0:  # Only update total_items at the start of the download process
@@ -494,15 +522,22 @@ class GUIDownloader(QWidget):
             self.processed_items += 1
 
             if item_text in self.ps3iso_list:
-                self.downloadps3isozip(item_text, f"{self.processed_items}/{self.total_items}", operation)
+                file_paths = self.downloadps3isozip(item_text, f"{self.processed_items}/{self.total_items}", operation)
+            elif item_text in self.psn_list:
+                file_paths = self.downloadps3psnzip(item_text, f"{self.processed_items}/{self.total_items}", operation)
             else:
-                self.downloadps3psnzip(item_text, f"{self.processed_items}/{self.total_items}", operation)
-        
+                file_paths = self.downloadps2isozip(item_text, f"{self.processed_items}/{self.total_items}", operation)
+        else:
+            # Reset processed_items and total_items to 0 when there are no more items in the queue
+            self.processed_items = 0
+            self.total_items = 0
+
         # Re-enable the buttons
         self.settings_button.setEnabled(True)
         self.add_to_queue_button.setEnabled(True)
         self.remove_from_queue_button.setEnabled(True)
-        self.operation_dropdown.setEnabled(True)
+        self.decrypt_checkbox.setEnabled(True)
+        self.split_checkbox.setEnabled(True)
         self.keep_dkey_checkbox.setEnabled(True)
         self.keep_enc_checkbox.setEnabled(True)
         self.keep_unsplit_dec_checkbox.setEnabled(True)
@@ -522,15 +557,14 @@ class GUIDownloader(QWidget):
         base_name = os.path.splitext(selected_iso)[0]
 
         # Check if the selected ISO already exists
-        if not os.path.isfile(base_name):
+        if not os.path.isfile(os.path.join(self.processing_dir, base_name + '.zip')):
             # Download the selected ISO
             self.output_window.append(f"({queue_position}) Download started for {base_name}...")
             self.progress_bar.reset()  # Reset the progress bar to 0
-            self.download_thread = DownloadThread(f"{url}/{selected_iso_encoded}", selected_iso)
+            self.download_thread = DownloadThread(f"{url}/{selected_iso_encoded}", os.path.join(self.processing_dir, base_name + '.zip'))
             self.download_thread.progress_signal.connect(self.progress_bar.setValue)
             self.download_thread.speed_signal.connect(self.download_speed_label.setText)
             self.download_thread.eta_signal.connect(self.download_eta_label.setText)
-
 
             # Create a QEventLoop
             loop = QEventLoop()
@@ -540,25 +574,31 @@ class GUIDownloader(QWidget):
             self.download_thread.start()
             loop.exec_()
 
+        return os.path.join(self.processing_dir, base_name + '.zip')
 
     def downloadps3isozip(self, selected_iso, queue_position, operation):
         url = "https://myrient.erista.me/files/Redump/Sony - PlayStation 3"
         base_name = os.path.splitext(selected_iso)[0]
-        self.downloadhelper(selected_iso, queue_position, operation, url)
+        file_path = self.downloadhelper(selected_iso, queue_position, operation, url)
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
 
         # Unzip the ISO and delete the ZIP file
-        runner = UnzipRunner(selected_iso, '.')
-        runner.output_signal.connect(self.output_window.append)
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
         runner.start()
-        runner.wait()  # Wait for the unzip operation to complete
-        os.remove(selected_iso)
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+
+        os.remove(file_path)
 
         # Check if the corresponding dkey file already exists
-        if not os.path.isfile(f"{os.path.splitext(selected_iso)[0]}.dkey"):
+        if not os.path.isfile(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey")):
             # Download the corresponding dkey file
             self.output_window.append(f"({queue_position}) Getting dkey for {base_name}...")
             self.progress_bar.reset()  # Reset the progress bar to 0
-            self.download_thread = DownloadThread(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/{os.path.splitext(selected_iso)[0]}.zip", f"{os.path.splitext(selected_iso)[0]}.zip")
+            self.download_thread = DownloadThread(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/{os.path.splitext(selected_iso)[0]}.zip", os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.zip"))
             self.download_thread.progress_signal.connect(self.progress_bar.setValue)
 
             # Create a QEventLoop
@@ -570,91 +610,150 @@ class GUIDownloader(QWidget):
             loop.exec_()
                 
             # Unzip the dkey file and delete the ZIP file
-            with zipfile.ZipFile(f"{os.path.splitext(selected_iso)[0]}.zip", 'r') as zip_ref:
-                zip_ref.extractall('.')
-            os.remove(f"{os.path.splitext(selected_iso)[0]}.zip")
+            with zipfile.ZipFile(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.zip"), 'r') as zip_ref:
+                zip_ref.extractall(self.processing_dir)
+            os.remove(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.zip"))
 
         # Read the first 32 characters of the .dkey file
-        with open(f"{os.path.splitext(selected_iso)[0]}.dkey", 'r') as file:
+        with open(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey"), 'r') as file:
             key = file.read(32)
 
         # Run the PS3Dec command if decryption is enabled
-        self.output_window.append(f"({queue_position}) Decrypting ISO for {base_name}...")
         if 'Decrypt' in operation:
+            self.output_window.append(f"({queue_position}) Decrypting ISO for {base_name}...")
             if platform.system() == 'Windows':
                 thread_count = multiprocessing.cpu_count() // 2
-                command = [f"{self.ps3dec_binary}", "--iso", f"{os.path.splitext(selected_iso)[0]}.iso", "--dk", key, "--tc", str(thread_count)]
+                command = [f"{self.ps3dec_binary}", "--iso", os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso"), "--dk", key, "--tc", str(thread_count)]
             else:
-                command = [self.ps3dec_binary, 'd', 'key', key, f"{os.path.splitext(selected_iso)[0]}.iso"]
+                command = [self.ps3dec_binary, 'd', 'key', key, os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso")]
 
             runner = CommandRunner(command)
-            runner.output_signal.connect(print)
             runner.start()
             runner.wait()  # Wait for the command to complete
 
             # Rename the original ISO file to .iso.enc
-            os.rename(f"{os.path.splitext(selected_iso)[0]}.iso", f"{os.path.splitext(selected_iso)[0]}.iso.enc")
+            os.rename(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso"), os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso.enc"))
 
             # Check the platform and rename the decrypted file accordingly
             if platform.system() == 'Windows':
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso_decrypted.iso", f"{os.path.splitext(selected_iso)[0]}.iso")
+                os.rename(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso_decrypted.iso"), os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso"))
             else:
-                os.rename(f"{os.path.splitext(selected_iso)[0]}.iso.dec", f"{os.path.splitext(selected_iso)[0]}.iso")
+                os.rename(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso.dec"), os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso"))
 
         # Split processed .iso file if splitting is enabled
-        self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
-        if 'Split' in operation:
-            split_iso_thread = SplitIsoThread(f"{os.path.splitext(selected_iso)[0]}.iso")
+        if 'Split' in operation and os.path.getsize(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso")) >= 4294967295:
+            self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
+            split_iso_thread = SplitIsoThread(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso"))
             split_iso_thread.progress.connect(print)
-            split_iso_thread.status.connect(lambda status: os.remove(f"{os.path.splitext(selected_iso)[0]}.iso") if status and not self.keep_unsplit_dec_checkbox.isChecked() else None)
             split_iso_thread.start()
             split_iso_thread.wait()  # Wait for the thread to finish
-            if split_iso_thread.isFinished():
-                self.output_window.append(f"({queue_position}) split_ps3iso completed for {base_name}")
+
+            # Delete the unsplit iso if the checkbox is unchecked
+            if not self.keep_unsplit_dec_checkbox.isChecked() and os.path.exists(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso")):
+                os.remove(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso"))
+
 
         # Delete the .dkey file if the 'Keep dkey file' checkbox is unchecked
         if not self.keep_dkey_checkbox.isChecked():
-            os.remove(f"{os.path.splitext(selected_iso)[0]}.dkey")
+            os.remove(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey"))
 
-        # Delete the .iso.enc file if the checkbox is unchecked
+        # Delete the .iso.enc if the checkbox is unchecked
         if not self.keep_enc_checkbox.isChecked():
-            os.remove(f"{os.path.splitext(selected_iso)[0]}.iso.enc")
+            os.remove(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.iso.enc"))
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, base_name + '*')):
+            shutil.move(file, self.ps3iso_dir)
 
         self.queue_list.takeItem(0)
-
         self.output_window.append(f"({queue_position}) {base_name} complete!")
 
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
+        
+
 
     def downloadps3psnzip(self, selected_iso, queue_position, operation):
         url = "https://download.mtcontent.rs/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
         base_name = os.path.splitext(selected_iso)[0]
-        self.downloadhelper(selected_iso, queue_position, operation, url)
+        file_path = self.downloadhelper(selected_iso, queue_position, operation, url)
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
 
         # Unzip the ISO and delete the ZIP file
-        runner = UnzipRunner(selected_iso, '.')
-        runner.output_signal.connect(self.output_window.append)
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
         runner.start()
-        runner.wait()  # Wait for the unzip operation to complete
-        os.remove(selected_iso)
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
 
         # Rename the extracted .pkg file to the original name of the zip file
-        for file in runner.extracted_files:  # Access the instance variable here
+        for file in runner.extracted_files: 
             if file.endswith('.pkg'):
-                new_file_path = f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}"
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
                 os.rename(file, new_file_path)
-                # If the 'split PKG' checkbox is checked, split the PKG file
-                if self.split_pkg_checkbox.isChecked():
+                if self.split_pkg_checkbox.isChecked():                                 # If the 'split PKG' checkbox is checked, split the PKG file
                     split_pkg_thread = SplitPkgThread(new_file_path)
                     split_pkg_thread.progress.connect(print)
-                    split_pkg_thread.status.connect(lambda status: self.output_window.append(f"({queue_position}) split_pkg completed for {base_name}") if status else None)
                     split_pkg_thread.start()
-                    split_pkg_thread.wait()  # Wait for the thread to finish
+                    split_pkg_thread.wait()
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.rap')):
+            shutil.move(file, self.psn_rap_dir)
+
+        for file in glob.glob(os.path.join(self.processing_dir, '*.pkg')) + glob.glob(os.path.join(self.processing_dir, '*.pkg.*')):
+            shutil.move(file, self.psn_pkg_dir)
 
         self.queue_list.takeItem(0)
         self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadps2isozip(self, selected_iso, queue_position, operation):
+        url = "https://myrient.erista.me/files/Redump/Sony - PlayStation 2"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, operation, url)
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+
+        os.remove(file_path)
+
+        # Go through the extracted files
+        for file in runner.extracted_files:
+            # If the file is an .iso file, check its size and potentially split it
+            if file.endswith('.iso'):
+                # Split processed .iso file if splitting is enabled
+                if 'Split' in operation and os.path.getsize(file) >= 4294967295:
+                    self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
+                    split_iso_thread = SplitIsoThread(file)
+                    split_iso_thread.progress.connect(print)
+                    split_iso_thread.start()
+                    split_iso_thread.wait()  # Wait for the thread to finish
+
+                    # Delete the unsplit iso if the checkbox is unchecked
+                    if not self.keep_unsplit_dec_checkbox.isChecked() and os.path.exists(file):
+                        os.remove(file)
+
+            # If the file is a .bin or .cue file, move it directly to ps2iso_dir
+            elif file.endswith('.bin') or file.endswith('.cue'):
+                shutil.move(file, self.ps2iso_dir)
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} complete!")
 
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
@@ -684,6 +783,29 @@ class GUIDownloader(QWidget):
         # TODO: Implement the logic to stop the current process
         pass
 
+    def update_results(self):
+        # Get the search term from the search box
+        search_term = self.search_box.text().lower().split()
+
+        # Determine which list to search based on the currently selected tab
+        if self.result_list.currentIndex() == 0:
+            list_to_search = self.ps3iso_list
+        elif self.result_list.currentIndex() == 1:
+            list_to_search = self.psn_list
+        else:
+            list_to_search = self.ps2iso_list  # Search the PS2 ISO list if the PS2 ISOs tab is selected
+
+        # Filter the list based on the search term
+        filtered_list = [item for item in list_to_search if all(word in item.lower() for word in search_term)]
+
+        # Clear the current list widget and add the filtered items
+        current_list_widget = self.result_list.currentWidget()
+        current_list_widget.clear()
+        current_list_widget.addItems(filtered_list)
+
+    def update_progress_bar(self, value):
+        self.progress_bar.setValue(value)
+
     def set_ps3iso_list(self, ps3iso_list):
         self.ps3iso_list = ps3iso_list
         self.result_list.widget(0).clear()
@@ -693,6 +815,115 @@ class GUIDownloader(QWidget):
         self.psn_list = psn_list
         self.result_list.widget(1).clear()
         self.result_list.widget(1).addItems(self.psn_list)
+
+    def set_ps2iso_list(self, ps2iso_list):
+        self.ps2iso_list = ps2iso_list
+        self.result_list.widget(2).clear()
+        self.result_list.widget(2).addItems(self.ps2iso_list)
+
+    def append_to_output_window(self, text):
+        self.output_window.append(text)
+
+    def settings_welcome_dialog(self, title, close_button_text, add_iso_list_section=False, welcome_text=None):
+        dialog = QDialog()
+        dialog.setWindowTitle(title)
+        vbox = QVBoxLayout(dialog)
+
+        # Adds welcome text when provided
+        if welcome_text is not None:
+            welcome_label = QLabel(welcome_text)
+            vbox.addWidget(welcome_label)
+
+        def select_location(name, select_button, path_textbox):
+            # section_label = QLabel(name)
+            # vbox.addWidget(section_label)
+
+            hbox = QHBoxLayout()
+            hbox.addWidget(select_button)
+            hbox.addWidget(path_textbox)
+
+            vbox.addLayout(hbox)
+
+        # PS3Dec section
+        ps3decSelectButton = QPushButton('Choose PS3Dec Binary')
+        ps3decPathTextbox = QLineEdit(self.settings.value('ps3dec_binary', ''))
+        ps3decSelectButton.clicked.connect(lambda: self.open_file_dialog(ps3decPathTextbox, 'ps3dec_binary'))
+        select_location("PS3Dec:", ps3decSelectButton, ps3decPathTextbox)
+
+        # PS3ISO section
+        ps3isoSelectButton = QPushButton('Choose PS3ISO Directory')
+        ps3isoPathTextbox = QLineEdit(self.settings.value('ps3iso_dir', 'MyrientDownloads/PS3ISO'))
+        ps3isoSelectButton.clicked.connect(lambda: self.open_directory_dialog(ps3isoPathTextbox, 'ps3iso_dir'))
+        select_location("PS3ISO Directory:", ps3isoSelectButton, ps3isoPathTextbox)
+
+        # PS2ISO section
+        ps2isoSelectButton = QPushButton('Choose PS2ISO Directory')
+        ps2isoPathTextbox = QLineEdit(self.settings.value('ps2iso_dir', 'MyrientDownloads/PS2ISO'))
+        ps2isoSelectButton.clicked.connect(lambda: self.open_directory_dialog(ps2isoPathTextbox, 'ps2iso_dir'))
+        select_location("PS2ISO Directory:", ps2isoSelectButton, ps2isoPathTextbox)
+
+        # PSN PKG section
+        psn_pkg_SelectButton = QPushButton('Choose PSN PKG Directory')
+        psn_pkg_PathTextbox = QLineEdit(self.settings.value('psn_pkg_dir', 'MyrientDownloads/packages'))
+        psn_pkg_SelectButton.clicked.connect(lambda: self.open_directory_dialog(psn_pkg_PathTextbox, 'psn_pkg_dir'))
+        select_location("PSN PKG Directory:", psn_pkg_SelectButton, psn_pkg_PathTextbox)
+
+        # PSN RAP section
+        psn_rap_SelectButton = QPushButton('Choose PSN RAP Directory')
+        psn_rap_PathTextbox = QLineEdit(self.settings.value('psn_rap_dir', 'MyrientDownloads/exdata'))
+        psn_rap_SelectButton.clicked.connect(lambda: self.open_directory_dialog(psn_rap_PathTextbox, 'psn_rap_dir'))
+        select_location("PSN RAP Directory:", psn_rap_SelectButton, psn_rap_PathTextbox)
+
+        # ISO List section
+        if add_iso_list_section:
+            iso_list_button = QPushButton('Update ISO List')
+            iso_list_button.clicked.connect(self.update_iso_list)
+            vbox.addWidget(iso_list_button)
+
+        # Close button
+        closeButton = QPushButton(close_button_text)
+        closeButton.clicked.connect(dialog.close)
+        vbox.addWidget(closeButton)
+
+        dialog.exec_()
+
+    def open_file_dialog(self, textbox, setting_key):
+        options = QFileDialog.Options()
+        options |= QFileDialog.ReadOnly
+        fileName, _ = QFileDialog.getOpenFileName(self, "Select File", "", "All Files (*);;Executable Files (*.exe)", options=options)
+        if fileName:
+            self.settings.setValue(setting_key, fileName)
+            textbox.setText(fileName)  # Update the textbox with the new path
+
+    def open_directory_dialog(self, textbox, setting_key):
+        options = QFileDialog.Options()
+        options |= QFileDialog.ReadOnly
+        dirName = QFileDialog.getExistingDirectory(self, "Select Directory", options=options)
+        if dirName:
+            self.settings.setValue(setting_key, dirName)
+            textbox.setText(dirName)  # Update the textbox with the new path
+
+            # Update the directory path in the application
+            if setting_key == 'ps3iso_dir':
+                self.ps3iso_dir = dirName
+            elif setting_key == 'ps2iso_dir':
+                self.ps2iso_dir = dirName
+            elif setting_key == 'psn_pkg_dir':
+                self.psn_pkg_dir = dirName
+            elif setting_key == 'psn_rap_dir':
+                self.psn_rap_dir = dirName
+
+    def open_settings(self):
+        self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
+
+    def first_startup(self):
+        welcome_text = "Welcome! The script can attempt to grab PS3Dec automatically or you can set it manually"
+        self.settings_welcome_dialog("Welcome!", "Continue", welcome_text=welcome_text)
+
+    def update_iso_list(self):
+        self.get_ps3iso_list_thread.start()
+        self.get_psn_list_thread.start()
+        self.get_ps2iso_list_thread.start()  
 
     def is_valid_binary(self, path, binary_name):
         # Check if the path is not empty, the file exists and the filename ends with the correct binary name
@@ -718,119 +949,6 @@ class GUIDownloader(QWidget):
         self.ps3dec_binary = './ps3dec' if sys.platform != "Windows" else './ps3dec.exe'
         self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
         textbox.setText(self.ps3dec_binary)
-
-    def settings_welcome_dialog(self, title, close_button_text, add_iso_list_section=False, welcome_text=None):
-        dialog = QDialog()
-        dialog.setWindowTitle(title)
-        vbox = QVBoxLayout(dialog)
-
-        # Adds welcome text if provided
-        if welcome_text is not None:
-            welcome_label = QLabel(welcome_text)
-            vbox.addWidget(welcome_label)
-
-        def create_binary_section(name, download_button, select_button, path_textbox):
-            section_label = QLabel(name)
-            vbox.addWidget(section_label)
-
-            vbox_buttons = QHBoxLayout()
-            vbox_buttons.addWidget(download_button)
-            vbox_buttons.addWidget(select_button)
-            vbox.addLayout(vbox_buttons)
-
-            vbox.addWidget(path_textbox)
-
-        # PS3Dec section
-        ps3decButton = QPushButton('Download PS3Dec')
-        ps3decSelectButton = QPushButton('Choose PS3Dec Binary')
-        ps3decPathTextbox = QLineEdit(self.ps3dec_binary)  # Initialize with existing path if available
-
-        # Disable the button and change the text if the user is not on Windows
-        if platform.system() != 'Windows':
-            ps3decButton.setEnabled(False)
-            ps3decButton.setText("Can't get prebuilt PS3Dec on Linux")
-
-        # Check if ps3dec is detected
-        if os.path.isfile("ps3dec") or os.path.isfile("ps3dec.exe"):
-            ps3decButton.setText('PS3Dec detected! ✅')
-            ps3decButton.setEnabled(False)
-
-        # Connect download button to the download_ps3dec method
-        ps3decButton.clicked.connect(lambda: self.download_ps3dec(ps3decButton, ps3decPathTextbox))
-
-        # Connect select button to the open_file_dialog_ps3dec method
-        ps3decSelectButton.clicked.connect(lambda: self.open_file_dialog_ps3dec(ps3decPathTextbox))
-
-        create_binary_section("PS3Dec:", ps3decButton, ps3decSelectButton, ps3decPathTextbox)
-
-        # ISO List section
-        if add_iso_list_section:
-            iso_list_button = QPushButton('Update ISO List')
-            iso_list_button.clicked.connect(self.update_iso_list)
-            vbox.addWidget(iso_list_button)
-
-        # Close button
-        closeButton = QPushButton(close_button_text)
-        closeButton.clicked.connect(dialog.close)
-        vbox.addWidget(closeButton)
-
-        # Show the dialog
-        dialog.exec_()
-
-    def open_settings(self):
-        self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
-
-    def first_startup(self):
-        welcome_text = "Welcome! The script can attempt to grab PS3Dec automatically or you can set it manually"
-        self.settings_welcome_dialog("Welcome!", "Continue", welcome_text=welcome_text)
-
-    def update_iso_list(self):
-        self.get_ps3iso_list_thread.start()
-        self.get_psn_list_thread.start()
-
-    def open_file_dialog_ps3dec(self, textbox):
-        options = QFileDialog.Options()
-        options |= QFileDialog.ReadOnly
-        fileName, _ = QFileDialog.getOpenFileName(self, "Select PS3Dec binary", "", "All Files (*);;Executable Files (*.exe)", options=options)
-        if fileName:
-            self.ps3dec_binary = fileName
-            self.settings.setValue('ps3dec_binary', fileName)
-            textbox.setText(fileName)  # Update the textbox with the new path
-
-    def update_results(self):
-        # Get the search term from the search box
-        search_term = self.search_box.text().lower()
-
-        # Determine which list to search based on the currently selected tab
-        if self.result_list.currentIndex() == 0:
-            list_to_search = self.ps3iso_list
-        else:
-            list_to_search = self.psn_list
-
-        # Filter the list based on the search term
-        filtered_list = [item for item in list_to_search if search_term in item.lower()]
-
-        # Clear the current list widget and add the filtered items
-        current_list_widget = self.result_list.currentWidget()
-        current_list_widget.clear()
-        current_list_widget.addItems(filtered_list)
-
-
-    def update_checkboxes(self):
-        # Show or hide the 'Keep unsplit decrypted ISO' checkbox based on the selected operation
-        if self.operation_dropdown.currentText() == 'Decrypt and Split':
-            self.keep_unsplit_dec_checkbox.show()
-            self.keep_dkey_checkbox.setChecked(False)
-        else:
-            self.keep_unsplit_dec_checkbox.hide()
-
-        # Show or hide the 'Keep encrypted ISO' checkbox based on the selected operation
-        if self.operation_dropdown.currentText() == 'Download Only':
-            self.keep_enc_checkbox.hide()
-            self.keep_dkey_checkbox.setChecked(True)
-        else:
-            self.keep_dkey_checkbox.setChecked(False)
-            self.keep_enc_checkbox.show()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
