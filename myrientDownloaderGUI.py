@@ -528,7 +528,6 @@ class GUIDownloader(QWidget):
             else:
                 file_paths = self.downloadps2isozip(item_text, f"{self.processed_items}/{self.total_items}", operation)
         else:
-            # Reset processed_items and total_items to 0 when there are no more items in the queue
             self.processed_items = 0
             self.total_items = 0
 
@@ -556,9 +555,8 @@ class GUIDownloader(QWidget):
         # Compute base_name from selected_iso
         base_name = os.path.splitext(selected_iso)[0]
 
-        # Check if the selected ISO already exists
+        # Check if the selected ISO already exists, download the selected ISO
         if not os.path.isfile(os.path.join(self.processing_dir, base_name + '.zip')):
-            # Download the selected ISO
             self.output_window.append(f"({queue_position}) Download started for {base_name}...")
             self.progress_bar.reset()  # Reset the progress bar to 0
             self.download_thread = DownloadThread(f"{url}/{selected_iso_encoded}", os.path.join(self.processing_dir, base_name + '.zip'))
@@ -695,7 +693,7 @@ class GUIDownloader(QWidget):
             if file.endswith('.pkg'):
                 new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
                 os.rename(file, new_file_path)
-                if self.split_pkg_checkbox.isChecked():                                 # If the 'split PKG' checkbox is checked, split the PKG file
+                if self.split_pkg_checkbox.isChecked():   # If the 'split PKG' checkbox is checked, split the PKG file
                     split_pkg_thread = SplitPkgThread(new_file_path)
                     split_pkg_thread.progress.connect(print)
                     split_pkg_thread.start()
@@ -734,19 +732,24 @@ class GUIDownloader(QWidget):
 
         # Go through the extracted files
         for file in runner.extracted_files:
-            # If the file is an .iso file, check its size and potentially split it
             if file.endswith('.iso'):
-                # Split processed .iso file if splitting is enabled
                 if 'Split' in operation and os.path.getsize(file) >= 4294967295:
                     self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
                     split_iso_thread = SplitIsoThread(file)
                     split_iso_thread.progress.connect(print)
                     split_iso_thread.start()
-                    split_iso_thread.wait()  # Wait for the thread to finish
+                    split_iso_thread.wait()  # Wait for thread to finish
 
                     # Delete the unsplit iso if the checkbox is unchecked
                     if not self.keep_unsplit_dec_checkbox.isChecked() and os.path.exists(file):
                         os.remove(file)
+
+                    for split_file in glob.glob(file.rsplit('.', 1)[0] + '*.iso.*'):
+                        shutil.move(split_file, self.ps2iso_dir)
+
+                else:
+                    # Move the iso to ps2iso_dir
+                    shutil.move(file, self.ps2iso_dir)
 
             # If the file is a .bin or .cue file, move it directly to ps2iso_dir
             elif file.endswith('.bin') or file.endswith('.cue'):
@@ -763,7 +766,6 @@ class GUIDownloader(QWidget):
         selected_items = self.result_list.currentWidget().selectedItems()
         for item in selected_items:
             item_text = item.text()
-            # Check if the item already exists in the queue
             if not any(item_text == self.queue_list.item(i).text() for i in range(self.queue_list.count())):
                 self.queue_list.addItem(item_text)
 
@@ -771,7 +773,6 @@ class GUIDownloader(QWidget):
         self.add_to_queue_button.setEnabled(bool(self.result_list.currentWidget().selectedItems()))
 
     def update_remove_from_queue_button(self):
-        # Enable the 'Remove from Queue' button if one or more items are selected in the queue list
         self.remove_from_queue_button.setEnabled(bool(self.queue_list.selectedItems()))
 
     def remove_from_queue(self):
@@ -784,18 +785,15 @@ class GUIDownloader(QWidget):
         pass
 
     def update_results(self):
-        # Get the search term from the search box
         search_term = self.search_box.text().lower().split()
 
-        # Determine which list to search based on the currently selected tab
         if self.result_list.currentIndex() == 0:
             list_to_search = self.ps3iso_list
         elif self.result_list.currentIndex() == 1:
             list_to_search = self.psn_list
         else:
-            list_to_search = self.ps2iso_list  # Search the PS2 ISO list if the PS2 ISOs tab is selected
+            list_to_search = self.ps2iso_list 
 
-        # Filter the list based on the search term
         filtered_list = [item for item in list_to_search if all(word in item.lower() for word in search_term)]
 
         # Clear the current list widget and add the filtered items
