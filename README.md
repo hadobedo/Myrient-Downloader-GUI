@@ -1,10 +1,10 @@
-# myrientgrabber-ps3
-PS3 ISO downloader/decryptor/splitter, written in Python
-![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/76519cb9-38ce-4423-8591-a9f3f9d318cd)
+# Myrient-Downloader-GUI
+Software downloader for Myrient written in Python
+![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/5d499a6b-b53e-4a09-bafe-785e01261973)
 
 Features:
-- Downloads, decrypts and splits PS3 ISO's 'automatically' from [the Myrient Video Game Preservationists](https://myrient.erista.me)
-- User-friendly setup (prompts users to download PS3Dec binary automatically)
+- Downloads software from [the Myrient Video Game Preservationists](https://myrient.erista.me), decrypts and splits downloaded software 'automatically' as necessary
+- User-friendly setup (prompts users to download required binaries automatically)
 - Cross platform, should work on Windows and Linux, may work on macOS
 
 Usage:
@@ -12,11 +12,11 @@ Usage:
 2. Run the exe, download/specify location of PS3Dec and you're good to go
 
 If you'd like to run this script as a .py file instead of a binary:
-1. Clone repo & cd into folder `git clone https://github.com/hadobedo/myrientgrabber-ps3/ && cd myrientgrabber-ps3/`
+1. Clone repo & cd into folder `git clone https://github.com/hadobedo/Myrient-Downloader-GUI/ && cd Myrient-Downloader-GUI/`
 2. Install the requirements (if on Arch Linux see below) `pip install -r requirements.txt`
 3. Run the script! `python3 ./myrientDownloaderGUI.py`
 
-~~Alternatively grab a precompiled EXE or Linux binary from the releases tab (nvm Windows Defender saw my pyinstaller script as trojan, will try again after cleaning up code(?) )
+Alternatively grab a precompiled EXE or Linux binary from the releases tab!
 
 If you're on a Arch Linux where the Python environment is externally managed you can install requirements like so:
 `sudo pacman -S python-aiohttp python-beautifulsoup4 python-pyqt5 python-requests`
@@ -32,11 +32,7 @@ Credits:
 
 TODO:
 - clean up code
-- add more game support for other consoles?
 
 screenshots:
-![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/76519cb9-38ce-4423-8591-a9f3f9d318cd)
-![image](https://github.com/hadobedo/myrientgrabber-ps3/assets/34556645/4c41ef9c-60bd-4a4a-a409-36f8ca854f69)
-
-
-use at your own risk etc etc
+![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/4447999e-d90f-409b-aab5-e68416e54637)
+![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/3d2af247-1eeb-4821-993f-715c21e14084)
