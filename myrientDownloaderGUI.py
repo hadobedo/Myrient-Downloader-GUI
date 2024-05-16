@@ -924,21 +924,25 @@ class GUIDownloader(QWidget):
             welcome_label = QLabel(welcome_text)
             vbox.addWidget(welcome_label)
 
-        def select_location(name, select_button, path_textbox):
-            # section_label = QLabel(name)
-            # vbox.addWidget(section_label)
-
+        def select_location(name, select_button, path_textbox, download_button=None):
             hbox = QHBoxLayout()
             hbox.addWidget(select_button)
             hbox.addWidget(path_textbox)
-
+            if download_button is not None:
+                hbox.addWidget(download_button)
             vbox.addLayout(hbox)
 
         # PS3Dec section
         ps3decSelectButton = QPushButton('Choose PS3Dec Binary')
         ps3decPathTextbox = QLineEdit(self.settings.value('ps3dec_binary', ''))
         ps3decSelectButton.clicked.connect(lambda: self.open_file_dialog(ps3decPathTextbox, 'ps3dec_binary'))
-        select_location("PS3Dec:", ps3decSelectButton, ps3decPathTextbox)
+        ps3decDownloadButton = QPushButton('Download PS3Dec')
+        if sys.platform == "win32":
+            ps3decDownloadButton.clicked.connect(lambda: self.download_ps3dec(ps3decDownloadButton, ps3decPathTextbox))
+        else:
+            ps3decDownloadButton.setEnabled(False)
+            ps3decDownloadButton.setToolTip('PS3Dec can only be retrieved on Windows')
+        select_location("PS3Dec:", ps3decSelectButton, ps3decPathTextbox, ps3decDownloadButton)
 
         # PS3ISO section
         ps3isoSelectButton = QPushButton('Choose PS3ISO Directory')
