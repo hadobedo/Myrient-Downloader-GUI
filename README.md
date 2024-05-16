@@ -1,5 +1,5 @@
 # Myrient-Downloader-GUI
-Software downloader for Myrient written in Python
+Tool to download software from Myrient, written in Python
 ![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/5d499a6b-b53e-4a09-bafe-785e01261973)
 
 Features:
