@@ -1,8 +1,9 @@
 # ignore json
 *.json
 
-# ignore ini
+# ignore ini, txt
 *.ini
+*.txt
 
 # ignore .vscode, .directory
 .vscode/
