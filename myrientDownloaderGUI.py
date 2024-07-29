@@ -4,6 +4,7 @@ import zipfile
 import sys
 import platform
 import shutil
+import signal
 import glob
 import multiprocessing
 import urllib
@@ -12,6 +13,8 @@ import urllib.parse
 import json
 import difflib
 import time
+import pickle
+import random
 import threading
 import asyncio
 from pathlib import Path
@@ -156,9 +159,14 @@ class UnzipRunner(QThread):
         super().__init__()
         self.zip_path = zip_path
         self.output_path = output_path
-        self.extracted_files = [] 
+        self.extracted_files = []
+        self.running = True  # Add a flag to indicate whether the runner is running
 
     def run(self):
+        if not self.zip_path.lower().endswith('.zip'):
+            print(f"File {self.zip_path} is not a .zip file. Skipping unzip.")
+            return
+
         with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
             total_size = sum([info.file_size for info in zip_ref.infolist()])
             extracted_size = 0
@@ -169,7 +177,7 @@ class UnzipRunner(QThread):
                     with open(file_out_path, 'wb') as file_out:
                         while True:
                             chunk = file_in.read(8192)
-                            if not chunk:
+                            if not chunk or not self.running:  # Stop reading if the runner is not running
                                 break
                             file_out.write(chunk)
                             extracted_size += len(chunk)
@@ -177,6 +185,8 @@ class UnzipRunner(QThread):
                             QApplication.processEvents()
                     self.extracted_files.append(file_out_path)  # Store the path of the extracted file
 
+    def stop(self):
+        self.running = False  # Add a method to stop the runner
 
 class DownloadThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -184,14 +194,15 @@ class DownloadThread(QThread):
     eta_signal = pyqtSignal(str)
     download_complete_signal = pyqtSignal()
 
-    def __init__(self, url, filename, retries=10):
+    def __init__(self, url, filename, retries=50):  # Increase retries to 50
         QThread.__init__(self)
         self.url = url
         self.filename = filename
         self.retries = retries
-        self.existing_file_size = 0 # used for speed, eta calc
-        self.start_time = None # used for speed, eta calc
-        self.current_session_downloaded = 0  # used for speed, eta calc
+        self.existing_file_size = 0
+        self.start_time = None
+        self.current_session_downloaded = 0
+        self.running = True  # Add a flag to indicate whether the thread is running
 
     async def download(self):
         headers = {
@@ -255,10 +266,12 @@ class DownloadThread(QThread):
                 break
             except aiohttp.ClientPayloadError:
                 print(f"Download interrupted. Retrying ({i+1}/{self.retries})...")
+                await asyncio.sleep(2 ** i + random.random())  # Exponential backoff
                 if i == self.retries - 1:  # If this was the last retry
                     raise  # Re-raise the exception
             except asyncio.TimeoutError:
                 print(f"Download interrupted. Retrying ({i+1}/{self.retries})...")
+                await asyncio.sleep(2 ** i + random.random())  # Exponential backoff
                 if i == self.retries - 1:  # If this was the last retry
                     raise  # Re-raise the exception
 
@@ -266,10 +279,8 @@ class DownloadThread(QThread):
         asyncio.run(self.download())
         self.download_complete_signal.emit()
 
-def download_file(self, url, filename):
-    self.progress_bar.reset()  # Reset the progress bar to 0 when new download begins
-    self.download_thread = DownloadThread(url, filename)
-    self.download_thread.start()
+    def stop(self):
+        self.running = False  # Add a method to stop the thread
 
 class GUIDownloader(QWidget):
     def __init__(self):
@@ -329,7 +340,33 @@ class GUIDownloader(QWidget):
         self.processed_items = 0 
         self.total_items = 0 
 
+        # Load the queue from 'queue.txt'
+        if os.path.exists('queue.txt'):
+            with open('queue.txt', 'rb') as file:
+                self.queue = pickle.load(file)
+        else:
+            self.queue = []
+
         self.initUI()
+
+        # Add the entries from 'queue.txt' to the queue
+        for item in self.queue:
+            self.queue_list.addItem(item)
+
+        # Add a signal handler for SIGINT to stop the download and save the queue
+        signal.signal(signal.SIGINT, self.closeEvent)
+
+    def closeEvent(self, event):
+        # Stop the UnzipRunner and DownloadThread
+        self.download_thread.stop()
+        self.unzip_runner.stop()
+
+        # Save the queue to 'queue.txt'
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        event.accept()  # Accept the close event
+
 
     def initUI(self):
         vbox = QVBoxLayout()
@@ -503,7 +540,6 @@ class GUIDownloader(QWidget):
         thread.start()
         return thread  # Return the thread
 
-
     def start_download(self):
         # Disable the GUI buttons
         self.settings_button.setEnabled(False)
@@ -538,9 +574,17 @@ class GUIDownloader(QWidget):
                 file_paths = self.downloadpsxzip(item_text, f"{self.processed_items}/{self.total_items}")
             else:  # New condition for PSP ISOs
                 file_paths = self.downloadpspisozip(item_text, f"{self.processed_items}/{self.total_items}")
+
+            # Remove the first item from the queue list
+            self.queue_list.takeItem(0)
+
         else:
             self.processed_items = 0
             self.total_items = 0
+
+        # Save the queue to 'queue.txt'
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
 
         # Re-enable the buttons
         self.settings_button.setEnabled(True)
@@ -555,6 +599,8 @@ class GUIDownloader(QWidget):
         self.keep_dkey_checkbox.setEnabled(True)
         self.start_button.setEnabled(True)
 
+
+
     def downloadhelper(self, selected_iso, queue_position, url):
         # URL-encode the selected_iso
         selected_iso_encoded = urllib.parse.quote(selected_iso)
@@ -566,27 +612,59 @@ class GUIDownloader(QWidget):
         # Compute base_name from selected_iso
         base_name = os.path.splitext(selected_iso)[0]
 
-        # Check if the selected ISO already exists, download the selected ISO
-        if not os.path.isfile(os.path.join(self.processing_dir, base_name + '.zip')):
-            self.output_window.append(f"({queue_position}) Download started for {base_name}...")
-            self.progress_bar.reset()  # Reset the progress bar to 0
-            self.download_thread = DownloadThread(f"{url}/{selected_iso_encoded}", os.path.join(self.processing_dir, base_name + '.zip'))
-            self.download_thread.progress_signal.connect(self.progress_bar.setValue)
-            self.download_thread.speed_signal.connect(self.download_speed_label.setText)
-            self.download_thread.eta_signal.connect(self.download_eta_label.setText)
+        # Define the file paths for .iso and .pkg files
+        iso_file_path = os.path.join(self.processing_dir, base_name + '.iso')
+        pkg_file_path = os.path.join(self.processing_dir, base_name + '.pkg')
 
-            # Create a QEventLoop
-            loop = QEventLoop()
-            self.download_thread.finished.connect(loop.quit)
+        # Check if the .iso or .pkg file already exists
+        if os.path.exists(iso_file_path) or os.path.exists(pkg_file_path):
+            print(f"File {iso_file_path} or {pkg_file_path} already exists. Skipping download.")
+            return iso_file_path if os.path.exists(iso_file_path) else pkg_file_path
 
-            # Start the thread and the event loop
-            self.download_thread.start()
-            loop.exec_()
+        # Define the path for the .zip file
+        zip_file_path = os.path.join(self.processing_dir, base_name + '.zip')
 
-        return os.path.join(self.processing_dir, base_name + '.zip')
+        # If the .zip file exists, compare its size to that of the remote URL
+        if os.path.exists(zip_file_path):
+            local_file_size = os.path.getsize(zip_file_path)
+
+            # Get the size of the remote file
+            response = requests.head(f"{url}/{selected_iso_encoded}")
+            if 'content-length' in response.headers:
+                remote_file_size = int(response.headers['content-length'])
+            else:
+                print("Could not get the size of the remote file.")
+                return zip_file_path
+
+            # If the local file is smaller, attempt to resume the download
+            if local_file_size < remote_file_size:
+                print(f"Local file is smaller than the remote file. Attempting to resume download...")
+            # If the local file is the same size as the remote file, skip the download
+            elif local_file_size == remote_file_size:
+                print(f"Local file is the same size as the remote file. Skipping download...")
+                return zip_file_path
+
+        # If the file does not exist, proceed with the download
+        self.output_window.append(f"({queue_position}) Download started for {base_name}...")
+        self.progress_bar.reset()  # Reset the progress bar to 0
+        self.download_thread = DownloadThread(f"{url}/{selected_iso_encoded}", zip_file_path)
+        self.download_thread.progress_signal.connect(self.progress_bar.setValue)
+        self.download_thread.speed_signal.connect(self.download_speed_label.setText)
+        self.download_thread.eta_signal.connect(self.download_eta_label.setText)
+
+        # Create a QEventLoop
+        loop = QEventLoop()
+        self.download_thread.finished.connect(loop.quit)
+
+        # Start the thread and the event loop
+        self.download_thread.start()
+        loop.exec_()
+
+        return zip_file_path
+
 
     def downloadps3isozip(self, selected_iso, queue_position):
-        url = "https://myrient.erista.me/files/Redump/Sony - PlayStation 3"
+        url = "https://dl10.myrient.erista.me/files/Redump/Sony - PlayStation 3"
         base_name = os.path.splitext(selected_iso)[0]
         file_path = self.downloadhelper(selected_iso, queue_position, url)
 
@@ -608,7 +686,7 @@ class GUIDownloader(QWidget):
                 # Download the corresponding dkey file
                 self.output_window.append(f"({queue_position}) Getting dkey for {base_name}...")
                 self.progress_bar.reset()  # Reset the progress bar to 0
-                self.download_thread = DownloadThread(f"https://myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/{os.path.splitext(selected_iso)[0]}.zip", os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.zip"))
+                self.download_thread = DownloadThread(f"https://dl10.myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/{os.path.splitext(selected_iso)[0]}.zip", os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.zip"))
                 self.download_thread.progress_signal.connect(self.progress_bar.setValue)
 
                 # Create a QEventLoop
@@ -624,13 +702,12 @@ class GUIDownloader(QWidget):
                     zip_ref.extractall(self.processing_dir)
                 os.remove(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.zip"))
 
-                # Read the first 32 characters of the .dkey file
-                if os.path.isfile(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey")):
-                    with open(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey"), 'r') as file:
-                        key = file.read(32)
-
         # Run the PS3Dec command if decryption is enabled
         if self.decrypt_checkbox.isChecked():
+        # Read the first 32 characters of the .dkey file
+            if os.path.isfile(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey")):
+                with open(os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}.dkey"), 'r') as file:
+                    key = file.read(32)
             self.output_window.append(f"({queue_position}) Decrypting ISO for {base_name}...")
             if platform.system() == 'Windows':
                 thread_count = multiprocessing.cpu_count() // 2
@@ -678,14 +755,21 @@ class GUIDownloader(QWidget):
         self.queue_list.takeItem(0)
         self.output_window.append(f"({queue_position}) {base_name} complete!")
 
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
 
     def downloadps3psnzip(self, selected_iso, queue_position):
-        url = "https://download.mtcontent.rs/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
+        url = "https://dl8.myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
         base_name = os.path.splitext(selected_iso)[0]
         file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
 
         self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
 
@@ -718,6 +802,9 @@ class GUIDownloader(QWidget):
 
         self.queue_list.takeItem(0)
         self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
 
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
@@ -767,6 +854,9 @@ class GUIDownloader(QWidget):
 
         self.queue_list.takeItem(0)
         self.output_window.append(f"({queue_position}) {base_name} complete!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
 
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
@@ -836,6 +926,9 @@ class GUIDownloader(QWidget):
         self.queue_list.takeItem(0)
         self.output_window.append(f"({queue_position}) {base_name} complete!")
 
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
@@ -847,16 +940,26 @@ class GUIDownloader(QWidget):
             if not any(item_text == self.queue_list.item(i).text() for i in range(self.queue_list.count())):
                 self.queue_list.addItem(item_text)
 
+        # Save the queue to 'queue.txt'
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+    def remove_from_queue(self):
+        selected_items = self.queue_list.selectedItems()
+        for item in selected_items:
+            # Remove the item from the queue list
+            self.queue_list.takeItem(self.queue_list.row(item))
+
+        # Save the queue to 'queue.txt'
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+
     def update_add_to_queue_button(self):
         self.add_to_queue_button.setEnabled(bool(self.result_list.currentWidget().selectedItems()))
 
     def update_remove_from_queue_button(self):
         self.remove_from_queue_button.setEnabled(bool(self.queue_list.selectedItems()))
-
-    def remove_from_queue(self):
-        selected_items = self.queue_list.selectedItems()
-        for item in selected_items:
-            self.queue_list.takeItem(self.queue_list.row(item))
 
     def stop_process(self):
         # TODO: Implement the logic to stop the current process
