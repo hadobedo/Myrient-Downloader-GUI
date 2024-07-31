@@ -473,7 +473,7 @@ class GUIDownloader(QWidget):
 
         # Create a checkbox for splitting the PKG file
         self.split_pkg_checkbox = QCheckBox('Split PKG', self)
-        self.split_pkg_checkbox.setChecked(False)
+        self.split_pkg_checkbox.setChecked(True) # Enable checkbox by default
         grid.addWidget(self.split_pkg_checkbox, 1, 1)
 
         # Create a checkbox for keeping or deleting the dkey file
@@ -554,7 +554,7 @@ class GUIDownloader(QWidget):
         self.keep_dkey_checkbox.setEnabled(False)
         self.start_button.setEnabled(False)
 
-        if self.queue_list.count() > 0:
+        while self.queue_list.count() > 0:
             item_text = self.queue_list.item(0).text()
 
             # Get the total number of items in the queue
@@ -578,9 +578,8 @@ class GUIDownloader(QWidget):
             # Remove the first item from the queue list
             self.queue_list.takeItem(0)
 
-        else:
-            self.processed_items = 0
-            self.total_items = 0
+        self.processed_items = 0
+        self.total_items = 0
 
         # Save the queue to 'queue.txt'
         with open('queue.txt', 'wb') as file:
@@ -598,6 +597,7 @@ class GUIDownloader(QWidget):
         self.split_pkg_checkbox.setEnabled(True)
         self.keep_dkey_checkbox.setEnabled(True)
         self.start_button.setEnabled(True)
+
 
 
 
@@ -795,10 +795,17 @@ class GUIDownloader(QWidget):
 
         # Move the finished file to the output directory
         for file in glob.glob(os.path.join(self.processing_dir, '*.rap')):
-            shutil.move(file, self.psn_rap_dir)
+            dst = os.path.join(self.psn_rap_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
 
         for file in glob.glob(os.path.join(self.processing_dir, '*.pkg')) + glob.glob(os.path.join(self.processing_dir, '*.pkg.*')):
-            shutil.move(file, self.psn_pkg_dir)
+            dst = os.path.join(self.psn_pkg_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
 
         self.queue_list.takeItem(0)
         self.output_window.append(f"({queue_position}) {base_name} ready!")
