@@ -295,6 +295,7 @@ class GUIDownloader(QWidget):
         self.ps2iso_dir = self.settings.value('ps2iso_dir', 'MyrientDownloads/PS2ISO')
         self.psxiso_dir = self.settings.value('psxiso_dir', 'MyrientDownloads/PSXISO')  # New setting
         self.pspiso_dir = self.settings.value('pspiso_dir', 'MyrientDownloads/PSPISO')  # New setting
+        self.gciso_dir = self.settings.value('gciso_dir', 'MyrientDownloads/GCISO')  # New setting
         self.processing_dir = 'processing'
 
         # Create directories if they do not exist
@@ -304,6 +305,7 @@ class GUIDownloader(QWidget):
         os.makedirs(self.ps2iso_dir, exist_ok=True)
         os.makedirs(self.psxiso_dir, exist_ok=True)  # New directory
         os.makedirs(self.pspiso_dir, exist_ok=True)  # New directory
+        os.makedirs(self.gciso_dir, exist_ok=True)  # New directory
         os.makedirs(self.processing_dir, exist_ok=True)
 
         # Check if the saved binary paths exist
@@ -323,18 +325,20 @@ class GUIDownloader(QWidget):
             # If not, open the first startup prompt
             self.first_startup()
 
-        self.ps3iso_list, self.psn_list, self.ps2iso_list, self.psxiso_list, self.pspiso_list = [['Loading... this will take a moment'] for _ in range(5)]
+        self.ps3iso_list, self.psn_list, self.ps2iso_list, self.psxiso_list, self.pspiso_list, self.gciso_list = [['Loading... this will take a moment'] for _ in range(6)]
 
         self.ps3iso_thread = self.load_software_list(self.ps3iso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/", 'ps3isolist.json', self.set_ps3iso_list)
         self.psn_thread = self.load_software_list(self.psn_list, "https://myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)", 'psnlist.json', self.set_psn_list)
         self.ps2iso_thread = self.load_software_list(self.ps2iso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202/", 'ps2isolist.json', self.set_ps2iso_list)
         self.psxiso_thread = self.load_software_list(self.psxiso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation/", 'psxlist.json', self.set_psxiso_list)
         self.pspiso_thread = self.load_software_list(self.pspiso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%20Portable/", 'psplist.json', self.set_pspiso_list)
+        self.gciso_thread = self.load_software_list(self.gciso_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20GameCube%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D/", 'gclist.json', self.set_gciso_list)
         self.ps3iso_thread.start()
         self.psn_thread.start()
         self.ps2iso_thread.start()
         self.psxiso_thread.start()
         self.pspiso_thread.start()
+        self.gciso_thread.start()
 
         # For displaying queue position in OutputWindow
         self.processed_items = 0 
@@ -382,18 +386,22 @@ class GUIDownloader(QWidget):
         vbox.addWidget(self.search_box)
 
         # Create a list for results (software list)
+        self.manufactuerer = QTabWidget(self)
         self.result_list = QTabWidget(self)
         self.result_list.addTab(QListWidget(), "PS3 ISOs")
         self.result_list.addTab(QListWidget(), "PSN PKGs")
         self.result_list.addTab(QListWidget(), "PS2 ISOs")
         self.result_list.addTab(QListWidget(), "PSX ISOs")  # New tab
         self.result_list.addTab(QListWidget(), "PSP ISOs")  # New tab
+        self.result_list.addTab(QListWidget(), "GC ISOs")  # New tab
         self.result_list.widget(0).addItems(self.ps3iso_list)
         self.result_list.widget(1).addItems(self.psn_list)
         self.result_list.widget(2).addItems(self.ps2iso_list)
         self.result_list.widget(3).addItems(self.psxiso_list)  # New list
         self.result_list.widget(4).addItems(self.pspiso_list)  # New list
+        self.result_list.widget(5).addItems(self.gciso_list)  # New list
         self.result_list.currentChanged.connect(self.update_add_to_queue_button)
+        self.result_list.currentChanged.connect(self.update_results)
         vbox.addWidget(self.result_list)
 
         # Connect the itemSelectionChanged signal to the update_add_to_queue_button method
@@ -402,6 +410,7 @@ class GUIDownloader(QWidget):
         self.result_list.widget(2).itemSelectionChanged.connect(self.update_add_to_queue_button)
         self.result_list.widget(3).itemSelectionChanged.connect(self.update_add_to_queue_button)  # New connection
         self.result_list.widget(4).itemSelectionChanged.connect(self.update_add_to_queue_button)  # New connection
+        self.result_list.widget(5).itemSelectionChanged.connect(self.update_add_to_queue_button)  # New connection
 
         # Allow selecting multiple items
         self.result_list.widget(0).setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -409,6 +418,7 @@ class GUIDownloader(QWidget):
         self.result_list.widget(2).setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.result_list.widget(3).setSelectionMode(QAbstractItemView.ExtendedSelection)  # New setting
         self.result_list.widget(4).setSelectionMode(QAbstractItemView.ExtendedSelection)  # New setting
+        self.result_list.widget(5).setSelectionMode(QAbstractItemView.ExtendedSelection)  # New setting
 
         # Create a horizontal box layout
         hbox = QHBoxLayout()
@@ -572,8 +582,10 @@ class GUIDownloader(QWidget):
                 file_paths = self.downloadps2isozip(item_text, f"{self.processed_items}/{self.total_items}")
             elif item_text in self.psxiso_list:  # New condition for PSX ISOs
                 file_paths = self.downloadpsxzip(item_text, f"{self.processed_items}/{self.total_items}")
-            else:  # New condition for PSP ISOs
+            elif item_text in self.pspiso_list:  # New condition for PSP ISOs
                 file_paths = self.downloadpspisozip(item_text, f"{self.processed_items}/{self.total_items}")
+            else:  # New condition for GC ISOs
+                file_paths = self.downloadgczip(item_text, f"{self.processed_items}/{self.total_items}")
 
             # Remove the first item from the queue list
             self.queue_list.takeItem(0)
@@ -939,6 +951,50 @@ class GUIDownloader(QWidget):
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
+          
+    def downloadgczip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/Redump/Nintendo - GameCube - NKit RVZ [zstd-19-128k]"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .rvz file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.rvz'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.rvz')) + glob.glob(os.path.join(self.processing_dir, '*.rvz.*')):
+            dst = os.path.join(self.gciso_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
 
     def add_to_queue(self):
         selected_items = self.result_list.currentWidget().selectedItems()
@@ -983,8 +1039,10 @@ class GUIDownloader(QWidget):
             list_to_search = self.ps2iso_list
         elif self.result_list.currentIndex() == 3:
             list_to_search = self.psxiso_list
+        elif self.result_list.currentIndex() == 4:
+            list_to_search = self.psxiso_list
         else:
-            list_to_search = self.pspiso_list
+            list_to_search = self.gciso_list
 
         filtered_list = [item for item in list_to_search if all(word in item.lower() for word in search_term)]
 
@@ -1020,6 +1078,11 @@ class GUIDownloader(QWidget):
         self.pspiso_list = pspiso_list
         self.result_list.widget(4).clear()
         self.result_list.widget(4).addItems(self.pspiso_list)
+        
+    def set_gciso_list(self, gciso_list):
+        self.gciso_list = gciso_list
+        self.result_list.widget(5).clear()
+        self.result_list.widget(5).addItems(self.gciso_list)
 
     def append_to_output_window(self, text):
         self.output_window.append(text)
@@ -1077,6 +1140,24 @@ class GUIDownloader(QWidget):
         psn_rap_PathTextbox = QLineEdit(self.settings.value('psn_rap_dir', 'MyrientDownloads/exdata'))
         psn_rap_SelectButton.clicked.connect(lambda: self.open_directory_dialog(psn_rap_PathTextbox, 'psn_rap_dir'))
         select_location("PSN RAP Directory:", psn_rap_SelectButton, psn_rap_PathTextbox)
+        
+        # PSXISO section
+        psxisoSelectButton = QPushButton('Choose PSXISO Directory')
+        psxisoPathTextbox = QLineEdit(self.settings.value('psxiso_dir', 'MyrientDownloads/PSXISO'))
+        psxisoSelectButton.clicked.connect(lambda: self.open_directory_dialog(psxisoPathTextbox, 'psxiso_dir'))
+        select_location("PSXISO Directory:", psxisoSelectButton, psxisoPathTextbox)
+        
+        # PSPISO section
+        pspisoSelectButton = QPushButton('Choose PSPISO Directory')
+        pspisoPathTextbox = QLineEdit(self.settings.value('pspiso_dir', 'MyrientDownloads/PSPISO'))
+        pspisoSelectButton.clicked.connect(lambda: self.open_directory_dialog(pspisoPathTextbox, 'pspiso_dir'))
+        select_location("PSPISO Directory:", pspisoSelectButton, pspisoPathTextbox)
+        
+        # GCISO section
+        gcisoSelectButton = QPushButton('Choose GCISO Directory')
+        gcisoPathTextbox = QLineEdit(self.settings.value('gciso_dir', 'MyrientDownloads/GCISO'))
+        gcisoSelectButton.clicked.connect(lambda: self.open_directory_dialog(gcisoPathTextbox, 'gciso_dir'))
+        select_location("GCISO Directory:", gcisoSelectButton, gcisoPathTextbox)
 
         # ISO List section
         if add_iso_list_section:
@@ -1116,6 +1197,12 @@ class GUIDownloader(QWidget):
                 self.psn_pkg_dir = dirName
             elif setting_key == 'psn_rap_dir':
                 self.psn_rap_dir = dirName
+            elif setting_key == 'psx_dir':
+                self.psx_dir = dirName
+            elif setting_key == 'psp_dir':
+                self.psp_dir = dirName
+            elif setting_key == 'gc_dir':
+                self.gc_dir = dirName
 
     def open_settings(self):
         self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
@@ -1127,7 +1214,10 @@ class GUIDownloader(QWidget):
     def update_iso_list(self):
         self.get_ps3iso_list_thread.start()
         self.get_psn_list_thread.start()
-        self.get_ps2iso_list_thread.start()  
+        self.get_ps2iso_list_thread.start()
+        self.get_psxiso_list_thread.start()
+        self.get_pspiso_list_thread.start()
+        self.get_gciso_list_thread.start()
 
     def is_valid_binary(self, path, binary_name):
         # Check if the path is not empty, the file exists and the filename ends with the correct binary name
