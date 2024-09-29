@@ -28,7 +28,17 @@ splitps3iso*
 *.pkg
 *.pkg.*
 *.rap
+*.nes
+*.gb
+*.sfc
+*.vb
+*.n64
+*.gbc
 *.rvz
+*.gba
+*.nds
+*.3ds
+*.wux
 
 # ignore game folders
 MyrientDownloads/

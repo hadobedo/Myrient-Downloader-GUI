@@ -295,7 +295,18 @@ class GUIDownloader(QWidget):
         self.ps3iso_dir = self.settings.value('ps3iso_dir', 'MyrientDownloads/PS3ISO')
         self.psn_pkg_dir = self.settings.value('psn_pkg_dir', 'MyrientDownloads/packages')
         self.psn_rap_dir = self.settings.value('psn_rap_dir', 'MyrientDownloads/exdata')
-        self.gciso_dir = self.settings.value('gciso_dir', 'MyrientDownloads/GCISO')
+        self.nes_dir = self.settings.value('nes_dir', 'MyrientDownloads/NES')
+        self.gb_dir = self.settings.value('gb_dir', 'MyrientDownloads/GB')
+        self.snes_dir = self.settings.value('snes_dir', 'MyrientDownloads/SNES')
+        self.vb_dir = self.settings.value('vb_dir', 'MyrientDownloads/VB')
+        self.n64_dir = self.settings.value('n64_dir', 'MyrientDownloads/N64')
+        self.gbc_dir = self.settings.value('gbc_dir', 'MyrientDownloads/GBC')
+        self.gc_dir = self.settings.value('gc_dir', 'MyrientDownloads/gc')
+        self.gba_dir = self.settings.value('gba_dir', 'MyrientDownloads/GBA')
+        self.nds_dir = self.settings.value('nds_dir', 'MyrientDownloads/NDS')
+        self.wii_dir = self.settings.value('wii_dir', 'MyrientDownloads/Wii')
+        self.n3ds_dir = self.settings.value('n3ds_dir', 'MyrientDownloads/3DS')
+        self.wiiu_dir = self.settings.value('wiiu_dir', 'MyrientDownloads/WiiU')
         self.processing_dir = 'processing'
 
         # Create directories if they do not exist
@@ -305,7 +316,18 @@ class GUIDownloader(QWidget):
         os.makedirs(self.ps3iso_dir, exist_ok=True)
         os.makedirs(self.psn_pkg_dir, exist_ok=True)
         os.makedirs(self.psn_rap_dir, exist_ok=True)
-        os.makedirs(self.gciso_dir, exist_ok=True)
+        os.makedirs(self.nes_dir, exist_ok=True)
+        os.makedirs(self.gb_dir, exist_ok=True)
+        os.makedirs(self.snes_dir, exist_ok=True)
+        os.makedirs(self.vb_dir, exist_ok=True)
+        os.makedirs(self.n64_dir, exist_ok=True)
+        os.makedirs(self.gbc_dir, exist_ok=True)
+        os.makedirs(self.gc_dir, exist_ok=True)
+        os.makedirs(self.gba_dir, exist_ok=True)
+        os.makedirs(self.nds_dir, exist_ok=True)
+        os.makedirs(self.wii_dir, exist_ok=True)
+        os.makedirs(self.n3ds_dir, exist_ok=True)
+        os.makedirs(self.wiiu_dir, exist_ok=True)
         os.makedirs(self.processing_dir, exist_ok=True)
 
         # Check if the saved binary paths exist
@@ -325,20 +347,43 @@ class GUIDownloader(QWidget):
             # If not, open the first startup prompt
             self.first_startup()
 
-        self.psxiso_list, self.ps2iso_list, self.pspiso_list, self.ps3iso_list, self.psn_list, self.gciso_list = [['Loading... this will take a moment'] for _ in range(6)]
+        self.psxiso_list, self.ps2iso_list, self.pspiso_list, self.ps3iso_list, self.psn_list, self.nes_list, self.gb_list, self.snes_list, self.vb_list, self.n64_list, self.gbc_list, self.gc_list, self.gba_list, self.nds_list, self.wii_list, self.n3ds_list, self.wiiu_list = [['Loading... this will take a moment'] for _ in range(17)]
 
         self.psxiso_thread = self.load_software_list(self.psxiso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation/", 'psxlist.json', self.set_psxiso_list)
         self.ps2iso_thread = self.load_software_list(self.ps2iso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202/", 'ps2isolist.json', self.set_ps2iso_list)
         self.pspiso_thread = self.load_software_list(self.pspiso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%20Portable/", 'psplist.json', self.set_pspiso_list)
         self.ps3iso_thread = self.load_software_list(self.ps3iso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/", 'ps3isolist.json', self.set_ps3iso_list)
         self.psn_thread = self.load_software_list(self.psn_list, "https://myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)", 'psnlist.json', self.set_psn_list)  
-        self.gciso_thread = self.load_software_list(self.gciso_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20GameCube%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D/", 'gclist.json', self.set_gciso_list)
+        self.nes_thread = self.load_software_list(self.nes_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%20Entertainment%20System%20%28Headered%29/", 'neslist.json', self.set_nes_list)
+        self.gb_thread = self.load_software_list(self.gb_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy/", 'gblist.json', self.set_gb_list)
+        self.snes_thread = self.load_software_list(self.snes_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/", 'sneslist.json', self.set_snes_list)
+        self.vb_thread = self.load_software_list(self.vb_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Virtual%20Boy/", 'vblist.json', self.set_vb_list)
+        self.n64_thread = self.load_software_list(self.n64_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%2064%20%28BigEndian%29/", 'n64list.json', self.set_n64_list)
+        self.gbc_thread = self.load_software_list(self.gbc_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Color/", 'gbclist.json', self.set_gbc_list)
+        self.gc_thread = self.load_software_list(self.gc_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20GameCube%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D/", 'gclist.json', self.set_gc_list)
+        self.gba_thread = self.load_software_list(self.gba_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Advance/", 'gbalist.json', self.set_gba_list)
+        self.nds_thread = self.load_software_list(self.nds_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%20DS%20%28Decrypted%29/", 'ndslist.json', self.set_nds_list)
+        self.wii_thread = self.load_software_list(self.wii_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D/", 'wiilist.json', self.set_wii_list)
+        self.n3ds_thread = self.load_software_list(self.n3ds_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%203DS%20%28Decrypted%29/", 'n3dslist.json', self.set_n3ds_list)
+        self.wiiu_thread = self.load_software_list(self.wiiu_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20U%20-%20WUX/", 'wiiulist.json', self.set_wiiu_list)
+
         self.psxiso_thread.start()
         self.ps2iso_thread.start()
         self.pspiso_thread.start()
         self.ps3iso_thread.start()
         self.psn_thread.start()
-        self.gciso_thread.start()        
+        self.nes_thread.start()
+        self.gb_thread.start()
+        self.snes_thread.start()
+        self.vb_thread.start()
+        self.n64_thread.start()
+        self.gbc_thread.start()
+        self.gc_thread.start()
+        self.gba_thread.start()
+        self.nds_thread.start()
+        self.wii_thread.start()
+        self.n3ds_thread.start()
+        self.wiiu_thread.start()
 
         # For displaying queue position in OutputWindow
         self.processed_items = 0 
@@ -401,19 +446,45 @@ class GUIDownloader(QWidget):
         self.result_list.addTab(QListWidget(), "PSP ISOs")
         self.result_list.addTab(QListWidget(), "PS3 ISOs")
         self.result_list.addTab(QListWidget(), "PSN PKGs")
+        self.result_list.addTab(QListWidget(), "NES ROMs")
+        self.result_list.addTab(QListWidget(), "GB ROMs")
+        self.result_list.addTab(QListWidget(), "SNES ROMs")
+        self.result_list.addTab(QListWidget(), "VB ROMs")
+        self.result_list.addTab(QListWidget(), "N64 ROMs")
+        self.result_list.addTab(QListWidget(), "GBC ROMs")
         self.result_list.addTab(QListWidget(), "GC ISOs")
+        self.result_list.addTab(QListWidget(), "GBA ROMs")
+        self.result_list.addTab(QListWidget(), "NDS ROMs")
+        self.result_list.addTab(QListWidget(), "Wii ISOs")
+        self.result_list.addTab(QListWidget(), "3DS ROMs")
+        self.result_list.addTab(QListWidget(), "WiiU ISOs")
         self.result_list.widget(0).addItems(self.ps3iso_list)
         self.result_list.widget(1).addItems(self.psn_list)
         self.result_list.widget(2).addItems(self.ps2iso_list)
         self.result_list.widget(3).addItems(self.psxiso_list)
         self.result_list.widget(4).addItems(self.pspiso_list)
-        self.result_list.widget(5).addItems(self.gciso_list)
+        self.result_list.widget(5).addItems(self.nes_list)
+        self.result_list.widget(6).addItems(self.gb_list)
+        self.result_list.widget(7).addItems(self.snes_list)
+        self.result_list.widget(8).addItems(self.vb_list)
+        self.result_list.widget(9).addItems(self.n64_list)
+        self.result_list.widget(10).addItems(self.gbc_list)
+        self.result_list.widget(11).addItems(self.gc_list)
+        self.result_list.widget(12).addItems(self.gba_list)
+        self.result_list.widget(13).addItems(self.nds_list)
+        self.result_list.widget(14).addItems(self.wii_list)
+        self.result_list.widget(15).addItems(self.n3ds_list)
+        self.result_list.widget(16).addItems(self.wiiu_list)
+
         self.result_list.currentChanged.connect(self.update_add_to_queue_button)
         self.result_list.currentChanged.connect(self.update_results)
         vbox.addWidget(self.result_list)
 
         #Hide Nintendo Tabs by default
-        self.result_list.setTabVisible(5, False)
+        i = 5
+        while i != 17:
+            self.result_list.setTabVisible(i, False)
+            i+=1
         self.manufacturer.currentIndexChanged.connect(self.manufacturer_selection)
 
         # Connect the itemSelectionChanged signal to the update_add_to_queue_button method
@@ -423,6 +494,18 @@ class GUIDownloader(QWidget):
         self.result_list.widget(3).itemSelectionChanged.connect(self.update_add_to_queue_button)
         self.result_list.widget(4).itemSelectionChanged.connect(self.update_add_to_queue_button)
         self.result_list.widget(5).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(6).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(7).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(8).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(9).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(10).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(11).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(12).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(13).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(14).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(15).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(16).itemSelectionChanged.connect(self.update_add_to_queue_button)
+
 
         # Allow selecting multiple items
         self.result_list.widget(0).setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -431,6 +514,18 @@ class GUIDownloader(QWidget):
         self.result_list.widget(3).setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.result_list.widget(4).setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.result_list.widget(5).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(6).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(7).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(8).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(9).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(10).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(11).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(12).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(13).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(14).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(15).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(16).setSelectionMode(QAbstractItemView.ExtendedSelection)
+
 
         # Create a horizontal box layout
         hbox = QHBoxLayout()
@@ -555,14 +650,15 @@ class GUIDownloader(QWidget):
         self.setWindowTitle('Myrient Downloader')
         self.resize(800, 600)
         self.show()
-
+    
     def manufacturer_selection(self):
         '''
         0: Sony
         1: Nintendo
         '''
-        manuIndexAssignment = [0,0,0,0,0,1]
+        manuIndexAssignment = [0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1]
         for i in range(len(manuIndexAssignment)):
+            self.result_list.setCurrentIndex(0)
             self.result_list.setTabVisible(i, self.manufacturer.currentIndex() == manuIndexAssignment[i])
 
     def load_software_list(self, software_list, url, json_filename, setter):
@@ -605,8 +701,30 @@ class GUIDownloader(QWidget):
                 file_paths = self.downloadps3isozip(item_text, f"{self.processed_items}/{self.total_items}")
             elif item_text in self.psn_list:
                 file_paths = self.downloadps3psnzip(item_text, f"{self.processed_items}/{self.total_items}")
-            else:
+            elif item_text in self.nes_list:
+                file_paths = self.downloadneszip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.gb_list:
+                file_paths = self.downloadgbzip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.snes_list:
+                file_paths = self.downloadsneszip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.vb_list:
+                file_paths = self.downloadvbzip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.n64_list:
+                file_paths = self.downloadn64zip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.gbc_list:
+                file_paths = self.downloadgbczip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.gc_list:
                 file_paths = self.downloadgczip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.gba_list:
+                file_paths = self.downloadgbazip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.nds_list:
+                file_paths = self.downloadndszip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.wii_list:
+                file_paths = self.downloadwiizip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.n3ds_list:
+                file_paths = self.downloadn3dszip(item_text, f"{self.processed_items}/{self.total_items}")
+            else:
+                file_paths = self.downloadwiiuzip(item_text, f"{self.processed_items}/{self.total_items}")
 
             # Remove the first item from the queue list
             self.queue_list.takeItem(0)
@@ -645,13 +763,23 @@ class GUIDownloader(QWidget):
         # Compute base_name from selected_iso
         base_name = os.path.splitext(selected_iso)[0]
 
-        # Define the file paths for .iso, .pkg, or .rvz files
+        # Define the file paths for .iso, .pkg, .nes, .gb, .sfc, .vb, .n64, .gbc, .rvz, .gba. .nds, .3ds, and .wux files
         iso_file_path = os.path.join(self.processing_dir, base_name + '.iso')
         pkg_file_path = os.path.join(self.processing_dir, base_name + '.pkg')
+        nes_file_path = os.path.join(self.processing_dir, base_name + '.nes')
+        gb_file_path = os.path.join(self.processing_dir, base_name + '.gb')
+        snes_file_path = os.path.join(self.processing_dir, base_name + '.sfc')
+        vb_file_path = os.path.join(self.processing_dir, base_name + '.vb')
+        n64_file_path = os.path.join(self.processing_dir, base_name + '.n64')
+        gbc_file_path = os.path.join(self.processing_dir, base_name + '.gbc')
         rvz_file_path = os.path.join(self.processing_dir, base_name + '.rvz')
+        gba_file_path = os.path.join(self.processing_dir, base_name + '.gba')
+        nds_file_path = os.path.join(self.processing_dir, base_name + '.nds')
+        n3ds_file_path = os.path.join(self.processing_dir, base_name + '.3ds')
+        wiiu_file_path = os.path.join(self.processing_dir, base_name + '.wux')
 
-        # Check if the .iso, .pkg, or .rvz file already exists
-        paths = [iso_file_path,pkg_file_path,rvz_file_path]
+        # Check if the .iso, .pkg, .nes, .gb, .sfc, .vb, .n64, .gbc, .rvz, .gba. .nds, .3ds, or .wux file already exists
+        paths = [iso_file_path,pkg_file_path,nes_file_path, gb_file_path, snes_file_path, vb_file_path, n64_file_path, gbc_file_path, gba_file_path, nds_file_path, n3ds_file_path, wiiu_file_path, rvz_file_path]
         for path in paths:
             if os.path.exists(path):
                 print(f"File {path} already exists. Skipping download.")
@@ -973,6 +1101,270 @@ class GUIDownloader(QWidget):
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
+
+    def downloadneszip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Nintendo Entertainment System (Headered)"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .nes file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.nes'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.nes')) + glob.glob(os.path.join(self.processing_dir, '*.nes.*')):
+            dst = os.path.join(self.nes_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadgbzip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Game Boy"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .gb file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.gb'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.gb')) + glob.glob(os.path.join(self.processing_dir, '*.gb.*')):
+            dst = os.path.join(self.gb_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadsneszip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Super Nintendo Entertainment System"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .sfc file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.sfc'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.sfc')) + glob.glob(os.path.join(self.processing_dir, '*.sfc.*')):
+            dst = os.path.join(self.sfc_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadvbzip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Virtual Boy"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .vb file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.vb'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.vb')) + glob.glob(os.path.join(self.processing_dir, '*.vb.*')):
+            dst = os.path.join(self.vb_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadn64zip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Nintendo 64 (BigEndian)"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .n64 file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.n64'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.n64')) + glob.glob(os.path.join(self.processing_dir, '*.n64.*')):
+            dst = os.path.join(self.n64_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadgbczip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Game Boy Color"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .gbc file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.gbc'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.gbc')) + glob.glob(os.path.join(self.processing_dir, '*.gbc.*')):
+            dst = os.path.join(self.gbc_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
           
     def downloadgczip(self, selected_iso, queue_position):
         url = "https://myrient.erista.me/files/Redump/Nintendo - GameCube - NKit RVZ [zstd-19-128k]"
@@ -1002,7 +1394,227 @@ class GUIDownloader(QWidget):
 
         # Move the finished file to the output directory
         for file in glob.glob(os.path.join(self.processing_dir, '*.rvz')) + glob.glob(os.path.join(self.processing_dir, '*.rvz.*')):
-            dst = os.path.join(self.gciso_dir, os.path.basename(file))
+            dst = os.path.join(self.gc_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadgbazip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Game Boy Advance"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .gba file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.gba'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.gba')) + glob.glob(os.path.join(self.processing_dir, '*.gba.*')):
+            dst = os.path.join(self.gba_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+    def downloadndszip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Nintendo DS (Decrypted)"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .nds file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.nds'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.nds')) + glob.glob(os.path.join(self.processing_dir, '*.nds.*')):
+            dst = os.path.join(self.nds_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+    def downloadwiizip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/Redump/Nintendo - Wii - NKit RVZ [zstd-19-128k]"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .rvz file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.rvz'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.rvz')) + glob.glob(os.path.join(self.processing_dir, '*.rvz.*')):
+            dst = os.path.join(self.wii_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadn3dszip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/No-Intro/Nintendo - Nintendo 3DS (Decrypted)"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .3ds file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.3ds'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.3ds')) + glob.glob(os.path.join(self.processing_dir, '*.3ds.*')):
+            dst = os.path.join(self.n3ds_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+
+
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        # If there are more items in the queue, start the next download
+        if self.queue_list.count() > 0:
+            self.start_download()
+
+    def downloadwiiuzip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/Redump/Nintendo - Wii U - WUX"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+
+        # Unzip the ISO and delete the ZIP file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+
+        # Rename the extracted .wux file to the original name of the zip file
+        for file in runner.extracted_files: 
+            if file.endswith('.wux'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+
+        # Move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.wux')) + glob.glob(os.path.join(self.processing_dir, '*.wux.*')):
+            dst = os.path.join(self.wux_dir, os.path.basename(file))
             if os.path.exists(dst):
                 print(f"File {dst} already exists. Overwriting.")
             shutil.move(file, dst)
@@ -1063,8 +1675,30 @@ class GUIDownloader(QWidget):
             list_to_search = self.ps3iso_list
         elif self.result_list.currentIndex() == 4:
             list_to_search = self.psn_list
+        elif self.result_list.currentIndex() == 5:
+            list_to_search = self.nes_list
+        elif self.result_list.currentIndex() == 6:
+            list_to_search = self.gb_list
+        elif self.result_list.currentIndex() == 7:
+            list_to_search = self.snes_list
+        elif self.result_list.currentIndex() == 8:
+            list_to_search = self.vb_list
+        elif self.result_list.currentIndex() == 9:
+            list_to_search = self.n64_list
+        elif self.result_list.currentIndex() == 10:
+            list_to_search = self.gbc_list
+        elif self.result_list.currentIndex() == 11:
+            list_to_search = self.gc_list
+        elif self.result_list.currentIndex() == 12:
+            list_to_search = self.gba_list
+        elif self.result_list.currentIndex() == 13:
+            list_to_search = self.nds_list
+        elif self.result_list.currentIndex() == 14:
+            list_to_search = self.wii_list
+        elif self.result_list.currentIndex() == 15:
+            list_to_search = self.n3ds_list
         else:
-            list_to_search = self.gciso_list
+            list_to_search = self.wiiu_list
 
         filtered_list = [item for item in list_to_search if all(word in item.lower() for word in search_term)]
 
@@ -1101,10 +1735,65 @@ class GUIDownloader(QWidget):
         self.result_list.widget(4).clear()
         self.result_list.widget(4).addItems(self.psn_list)
         
-    def set_gciso_list(self, gciso_list):
-        self.gciso_list = gciso_list
+    def set_nes_list(self, nes_list):
+        self.nes_list = nes_list
         self.result_list.widget(5).clear()
-        self.result_list.widget(5).addItems(self.gciso_list)
+        self.result_list.widget(5).addItems(self.nes_list)
+    
+    def set_gb_list(self, gb_list):
+        self.gb_list = gb_list
+        self.result_list.widget(6).clear()
+        self.result_list.widget(6).addItems(self.gb_list)
+    
+    def set_snes_list(self, snes_list):
+        self.snes_list = snes_list
+        self.result_list.widget(7).clear()
+        self.result_list.widget(7).addItems(self.snes_list)
+
+    def set_vb_list(self, vb_list):
+        self.vb_list = vb_list
+        self.result_list.widget(8).clear()
+        self.result_list.widget(8).addItems(self.vb_list)
+
+    def set_n64_list(self,n64_list):
+        self.n64_list = n64_list
+        self.result_list.widget(9).clear()
+        self.result_list.widget(9).addItems(self.n64_list)
+
+    def set_gbc_list(self, gbc_list):
+        self.gbc_list = gbc_list
+        self.result_list.widget(10).clear()
+        self.result_list.widget(10).addItems(self.gbc_list)
+
+    def set_gc_list(self, gc_list):
+        self.gc_list = gc_list
+        self.result_list.widget(11).clear()
+        self.result_list.widget(11).addItems(self.gc_list)
+
+    def set_gba_list(self, gba_list):
+        self.gba_list = gba_list
+        self.result_list.widget(12).clear()
+        self.result_list.widget(12).addItems(self.gba_list)
+
+    def set_nds_list(self, nds_list):
+        self.nds_list = nds_list
+        self.result_list.widget(13).clear()
+        self.result_list.widget(13).addItems(self.nds_list)
+
+    def set_wii_list(self, wii_list):
+        self.wii_list = wii_list
+        self.result_list.widget(14).clear()
+        self.result_list.widget(14).addItems(self.wii_list)
+
+    def set_n3ds_list(self, n3ds_list):
+        self.n3ds_list = n3ds_list
+        self.result_list.widget(15).clear()
+        self.result_list.widget(15).addItems(self.n3ds_list)
+
+    def set_wiiu_list(self, wiiu_list):
+        self.wiiu_list = wiiu_list
+        self.result_list.widget(16).clear()
+        self.result_list.widget(16).addItems(self.wiiu_list)
 
     def append_to_output_window(self, text):
         self.output_window.append(text)
@@ -1175,11 +1864,77 @@ class GUIDownloader(QWidget):
         psn_rap_SelectButton.clicked.connect(lambda: self.open_directory_dialog(psn_rap_PathTextbox, 'psn_rap_dir'))
         select_location("PSN RAP Directory:", psn_rap_SelectButton, psn_rap_PathTextbox)
         
-        # GCISO section
-        gcisoSelectButton = QPushButton('Choose GCISO Directory')
-        gcisoPathTextbox = QLineEdit(self.settings.value('gciso_dir', 'MyrientDownloads/GCISO'))
-        gcisoSelectButton.clicked.connect(lambda: self.open_directory_dialog(gcisoPathTextbox, 'gciso_dir'))
-        select_location("GCISO Directory:", gcisoSelectButton, gcisoPathTextbox)
+        # NES section
+        nesSelectButton = QPushButton('Choose NES Directory')
+        nesPathTextbox = QLineEdit(self.settings.value('nes_dir', 'MyrientDownloads/NES'))
+        nesSelectButton.clicked.connect(lambda: self.open_directory_dialog(nesPathTextbox, 'nes_dir'))
+        select_location("NES Directory:", nesSelectButton, nesPathTextbox)
+
+        # GB section
+        gbSelectButton = QPushButton('Choose GB Directory')
+        gbPathTextbox = QLineEdit(self.settings.value('gb_dir', 'MyrientDownloads/GB'))
+        gbSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbPathTextbox, 'gb_dir'))
+        select_location("GB Directory:", gbSelectButton, gbPathTextbox)
+
+        # SNES section
+        snesSelectButton = QPushButton('Choose SNES Directory')
+        snesPathTextbox = QLineEdit(self.settings.value('snes_dir', 'MyrientDownloads/SNES'))
+        snesSelectButton.clicked.connect(lambda: self.open_directory_dialog(snesPathTextbox, 'snes_dir'))
+        select_location("SNES Directory:", snesSelectButton, snesPathTextbox)
+
+        # VB section
+        vbSelectButton = QPushButton('Choose VB Directory')
+        vbPathTextbox = QLineEdit(self.settings.value('vb_dir', 'MyrientDownloads/VB'))
+        vbSelectButton.clicked.connect(lambda: self.open_directory_dialog(vbPathTextbox, 'vb_dir'))
+        select_location("VB Directory:", vbSelectButton, vbPathTextbox)
+
+        # N64 section
+        n64SelectButton = QPushButton('Choose N64 Directory')
+        n64PathTextbox = QLineEdit(self.settings.value('n64_dir', 'MyrientDownloads/N64'))
+        n64SelectButton.clicked.connect(lambda: self.open_directory_dialog(n64PathTextbox, 'n64_dir'))
+        select_location("N64 Directory:", n64SelectButton, n64PathTextbox)
+
+        # GBC section
+        gbcSelectButton = QPushButton('Choose GBC Directory')
+        gbcPathTextbox = QLineEdit(self.settings.value('gbc_dir', 'MyrientDownloads/GBC'))
+        gbcSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbcPathTextbox, 'gbc_dir'))
+        select_location("GBC Directory:", gbcSelectButton, gbcPathTextbox)
+
+        # GC section
+        gcSelectButton = QPushButton('Choose GC Directory')
+        gcPathTextbox = QLineEdit(self.settings.value('gc_dir', 'MyrientDownloads/GC'))
+        gcSelectButton.clicked.connect(lambda: self.open_directory_dialog(gcPathTextbox, 'gc_dir'))
+        select_location("GC Directory:", gcSelectButton, gcPathTextbox)
+
+        # GBA section
+        gbaSelectButton = QPushButton('Choose GBA Directory')
+        gbaPathTextbox = QLineEdit(self.settings.value('gba_dir', 'MyrientDownloads/GBA'))
+        gbaSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbaPathTextbox, 'gba_dir'))
+        select_location("GBA Directory:", gbaSelectButton, gbaPathTextbox)
+
+        # NDS section
+        ndsSelectButton = QPushButton('Choose NDS Directory')
+        ndsPathTextbox = QLineEdit(self.settings.value('ndsdir', 'MyrientDownloads/NDS'))
+        ndsSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbcPathTextbox, 'nds_dir'))
+        select_location("NDS Directory:", ndsSelectButton, ndsPathTextbox)
+
+        # Wii section
+        wiiSelectButton = QPushButton('Choose Wii Directory')
+        wiiPathTextbox = QLineEdit(self.settings.value('wii_dir', 'MyrientDownloads/Wii'))
+        wiiSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbcPathTextbox, 'wii_dir'))
+        select_location("Wii Directory:", wiiSelectButton, wiiPathTextbox)
+
+        # N3DS section
+        n3dsSelectButton = QPushButton('Choose 3DS Directory')
+        n3dsPathTextbox = QLineEdit(self.settings.value('3ds_dir', 'MyrientDownloads/3DS'))
+        n3dsSelectButton.clicked.connect(lambda: self.open_directory_dialog(n3dsPathTextbox, '3ds_dir'))
+        select_location("3DS Directory:", n3dsSelectButton, n3dsPathTextbox)
+
+        # WiiU section
+        wiiuSelectButton = QPushButton('Choose WiiU Directory')
+        wiiuPathTextbox = QLineEdit(self.settings.value('gbc_dir', 'MyrientDownloads/WiiU'))
+        wiiuSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbcPathTextbox, 'wiiu_dir'))
+        select_location("WiiU Directory:", wiiuSelectButton, wiiuPathTextbox)
 
         # ISO List section
         if add_iso_list_section:
@@ -1223,8 +1978,30 @@ class GUIDownloader(QWidget):
                 self.psn_pkg_dir = dirName
             elif setting_key == 'psn_rap_dir':
                 self.psn_rap_dir = dirName
+            elif setting_key == 'nes_dir':
+                self.nes_dir = dirName
+            elif setting_key == 'gb_dir':
+                self.gb_dir = dirName
+            elif setting_key == 'snes_dir':
+                self.snes_dir = dirName
+            elif setting_key == 'vb_dir':
+                self.vb_dir = dirName
+            elif setting_key == 'n64_dir':
+                self.n64_dir = dirName
+            elif setting_key == 'gbc_dir':
+                self.gbc_dir = dirName
             elif setting_key == 'gc_dir':
                 self.gc_dir = dirName
+            elif setting_key == 'gba_dir':
+                self.gba_dir = dirName
+            elif setting_key == 'nds_dir':
+                self.nds_dir = dirName
+            elif setting_key == 'wii_dir':
+                self.wii_dir = dirName
+            elif setting_key == 'n3ds_dir':
+                self.n3ds_dir = dirName
+            elif setting_key == 'wiiu_dir':
+                self.wiiu_dir = dirName
 
     def open_settings(self):
         self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
@@ -1238,8 +2015,19 @@ class GUIDownloader(QWidget):
         self.get_ps2iso_list_thread.start()
         self.get_pspiso_list_thread.start()
         self.get_ps3iso_list_thread.start()
-        self.get_psn_list_thread.start()        
-        self.get_gciso_list_thread.start()
+        self.get_psn_list_thread.start()
+        self.get_nes_list_thread.start()
+        self.get_gb_list_thread.start()
+        self.get_snes_list_thread.start()
+        self.get_vb_list_thread.start()
+        self.get_n64_list_thread.start()
+        self.get_gbc_list_thread.start()
+        self.get_gc_list_thread.start()
+        self.get_gba_list_thread.start()
+        self.get_nds_list_thread.start()
+        self.get_wii_list_thread.start()
+        self.get_n3ds_list_thread.start()
+        self.get_wiiu_list_thread.start()
 
     def is_valid_binary(self, path, binary_name):
         # Check if the path is not empty, the file exists and the filename ends with the correct binary name
