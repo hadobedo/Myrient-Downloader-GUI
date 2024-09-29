@@ -28,6 +28,7 @@ splitps3iso*
 *.pkg
 *.pkg.*
 *.rap
+*.rvz
 
 # ignore game folders
 MyrientDownloads/
