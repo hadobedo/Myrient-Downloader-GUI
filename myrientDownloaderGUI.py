@@ -5,8 +5,8 @@ from bs4 import BeautifulSoup
 from PyQt5.QtWidgets import QApplication, QGridLayout, QGroupBox, QWidget, QVBoxLayout, \
     QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, \
     QFileDialog, QDialog, QHBoxLayout, QAbstractItemView, QProgressBar, \
-    QTabWidget
-from PyQt5.QtCore import QThread, pyqtSignal, QSettings, QEventLoop
+    QTabWidget, QListWidgetItem
+from PyQt5.QtCore import QThread, pyqtSignal, QSettings, QEventLoop, Qt
 from PyQt5.QtGui import QTextCursor
 
 class GetSoftwareListThread(QThread):
@@ -681,7 +681,9 @@ class GUIDownloader(QWidget):
         self.start_button.setEnabled(False)
 
         while self.queue_list.count() > 0:
-            item_text = self.queue_list.item(0).text()
+            item = self.queue_list.item(0)
+            item_text = item.text()
+            system_index = item.data(Qt.UserRole)
 
             # Get the total number of items in the queue
             if self.processed_items == 0:  # Only update total_items at the start of the download process
@@ -690,44 +692,34 @@ class GUIDownloader(QWidget):
             # Increment the processed_items counter
             self.processed_items += 1
 
-            if item_text in self.psxiso_list:
-                file_paths = self.downloadpsxzip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.ps2iso_list:
-                file_paths = self.downloadps2isozip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.pspiso_list:
-                file_paths = self.downloadpspisozip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.ps3iso_list:
-                file_paths = self.downloadps3isozip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.psn_list:
-                file_paths = self.downloadps3psnzip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.nes_list:
-                file_paths = self.downloadneszip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.gb_list:
-                file_paths = self.downloadgbzip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.snes_list:
-                file_paths = self.downloadsneszip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.vb_list:
-                file_paths = self.downloadvbzip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.n64_list:
-                file_paths = self.downloadn64zip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.gbc_list:
-                file_paths = self.downloadgbczip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.gc_list:
-                file_paths = self.downloadgczip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.gba_list:
-                file_paths = self.downloadgbazip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.nds_list:
-                file_paths = self.downloadndszip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.wii_list:
-                file_paths = self.downloadwiizip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.n3ds_list:
-                file_paths = self.downloadn3dszip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.wiiu_list:
-                file_paths = self.downloadwiiuzip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.xbox360_list:
-                file_paths = self.downloadxbox360zip(item_text, f"{self.processed_items}/{self.total_items}")
-            elif item_text in self.xbox_list:
-                file_paths = self.downloadxboxzip(item_text, f"{self.processed_items}/{self.total_items}")
+            # Map system_index to the corresponding download function
+            system_download_functions = {
+                0: self.downloadpsxzip,
+                1: self.downloadps2isozip,
+                2: self.downloadpspisozip,
+                3: self.downloadps3isozip,
+                4: self.downloadps3psnzip,
+                5: self.downloadneszip,
+                6: self.downloadgbzip,
+                7: self.downloadsneszip,
+                8: self.downloadvbzip,
+                9: self.downloadn64zip,
+                10: self.downloadgbczip,
+                11: self.downloadgczip,
+                12: self.downloadgbazip,
+                13: self.downloadndszip,
+                14: self.downloadwiizip,
+                15: self.downloadn3dszip,
+                16: self.downloadwiiuzip,
+                17: self.downloadxbox360zip,
+                18: self.downloadxboxzip,
+            }
+
+            download_function = system_download_functions.get(system_index)
+            if download_function:
+                file_paths = download_function(item_text, f"{self.processed_items}/{self.total_items}")
+            else:
+                print(f"No download function for system index {system_index}")
 
             # Remove the first item from the queue list
             self.queue_list.takeItem(0)
@@ -1723,14 +1715,20 @@ class GUIDownloader(QWidget):
 
     def add_to_queue(self):
         selected_items = self.result_list.currentWidget().selectedItems()
+        current_system_index = self.result_list.currentIndex()
         for item in selected_items:
             item_text = item.text()
-            if not any(item_text == self.queue_list.item(i).text() for i in range(self.queue_list.count())):
-                self.queue_list.addItem(item_text)
-
-        # Save the queue to 'queue.txt'
-        with open('queue.txt', 'wb') as file:
-            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+            # Check for duplicates by comparing both item_text and system_index
+            duplicate = False
+            for i in range(self.queue_list.count()):
+                queue_item = self.queue_list.item(i)
+                if queue_item.text() == item_text and queue_item.data(Qt.UserRole) == current_system_index:
+                    duplicate = True
+                    break
+            if not duplicate:
+                new_item = QListWidgetItem(item_text)
+                new_item.setData(Qt.UserRole, current_system_index)
+                self.queue_list.addItem(new_item)
 
     def remove_from_queue(self):
         selected_items = self.queue_list.selectedItems()
