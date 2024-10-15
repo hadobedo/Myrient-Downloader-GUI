@@ -1,26 +1,6 @@
-import os
-import subprocess
-import zipfile
-import sys
-import platform
-import shutil
-import signal
-import glob
-import multiprocessing
-import urllib
-import urllib.request
-import urllib.parse
-import json
-import difflib
-import time
-import pickle
-import random
-import threading
-import asyncio
+import os, subprocess, zipfile, sys, platform, shutil, signal, glob, multiprocessing, urllib, urllib.request, urllib.parse, json, time, pickle, random, threading, asyncio, requests, aiohttp
 from pathlib import Path
 from urllib.parse import unquote
-import requests
-import aiohttp
 from bs4 import BeautifulSoup
 from PyQt5.QtWidgets import QApplication, QGridLayout, QGroupBox, QWidget, QVBoxLayout, \
     QPushButton, QComboBox, QLineEdit, QListWidget, QLabel, QCheckBox, QTextEdit, \
@@ -307,6 +287,8 @@ class GUIDownloader(QWidget):
         self.wii_dir = self.settings.value('wii_dir', 'MyrientDownloads/Wii')
         self.n3ds_dir = self.settings.value('n3ds_dir', 'MyrientDownloads/3DS')
         self.wiiu_dir = self.settings.value('wiiu_dir', 'MyrientDownloads/WiiU')
+        self.xbox360_dir = self.settings.value('xbox360_dir', 'MyrientDownloads/Xbox360')
+        self.xbox_dir = self.settings.value('xbox_dir', 'MyrientDownloads/Xbox')
         self.processing_dir = 'processing'
 
         # Create directories if they do not exist
@@ -329,7 +311,8 @@ class GUIDownloader(QWidget):
         os.makedirs(self.n3ds_dir, exist_ok=True)
         os.makedirs(self.wiiu_dir, exist_ok=True)
         os.makedirs(self.processing_dir, exist_ok=True)
-
+        os.makedirs(self.xbox360_dir, exist_ok=True)
+        os.makedirs(self.xbox_dir, exist_ok=True)
         # Check if the saved binary paths exist
         if not os.path.isfile(self.ps3dec_binary):
             self.ps3dec_binary = ''
@@ -347,7 +330,8 @@ class GUIDownloader(QWidget):
             # If not, open the first startup prompt
             self.first_startup()
 
-        self.psxiso_list, self.ps2iso_list, self.pspiso_list, self.ps3iso_list, self.psn_list, self.nes_list, self.gb_list, self.snes_list, self.vb_list, self.n64_list, self.gbc_list, self.gc_list, self.gba_list, self.nds_list, self.wii_list, self.n3ds_list, self.wiiu_list = [['Loading... this will take a moment'] for _ in range(17)]
+        self.psxiso_list, self.ps2iso_list, self.pspiso_list, self.ps3iso_list, self.psn_list, self.nes_list, self.gb_list, self.snes_list, self.vb_list, self.n64_list, self.gbc_list, self.gc_list, self.gba_list, self.nds_list, self.wii_list, self.n3ds_list, self.wiiu_list, self.xbox360_list, self.xbox_list = [['Loading... this will take a moment'] for _ in range(19)]
+        
 
         self.psxiso_thread = self.load_software_list(self.psxiso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation/", 'psxlist.json', self.set_psxiso_list)
         self.ps2iso_thread = self.load_software_list(self.ps2iso_list, "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202/", 'ps2isolist.json', self.set_ps2iso_list)
@@ -366,7 +350,8 @@ class GUIDownloader(QWidget):
         self.wii_thread = self.load_software_list(self.wii_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D/", 'wiilist.json', self.set_wii_list)
         self.n3ds_thread = self.load_software_list(self.n3ds_list, "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%203DS%20%28Decrypted%29/", 'n3dslist.json', self.set_n3ds_list)
         self.wiiu_thread = self.load_software_list(self.wiiu_list, "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20U%20-%20WUX/", 'wiiulist.json', self.set_wiiu_list)
-
+        self.xbox360_thread = self.load_software_list(self.xbox360_list, "https://myrient.erista.me/files/Redump/Microsoft%20-%20Xbox%20360/", 'xbox360list.json', self.set_xbox360_list)
+        self.xbox_thread = self.load_software_list(self.xbox_list, "https://myrient.erista.me/files/Redump/Microsoft%20-%20Xbox/", 'xboxlist.json', self.set_xbox_list)
         self.psxiso_thread.start()
         self.ps2iso_thread.start()
         self.pspiso_thread.start()
@@ -384,7 +369,8 @@ class GUIDownloader(QWidget):
         self.wii_thread.start()
         self.n3ds_thread.start()
         self.wiiu_thread.start()
-
+        self.xbox360_thread.start()
+        self.xbox_thread.start()
         # For displaying queue position in OutputWindow
         self.processed_items = 0 
         self.total_items = 0 
@@ -426,7 +412,7 @@ class GUIDownloader(QWidget):
 
         #Combobox for Manufacturer
         self.manufacturer = QComboBox(self)
-        self.manufacturer.addItems(['Sony', 'Nintendo'])
+        self.manufacturer.addItems(['Sony', 'Nintendo', 'Microsoft'])
         vbox.addWidget(self.manufacturer)
         
         # Add a header for the software list
@@ -458,6 +444,8 @@ class GUIDownloader(QWidget):
         self.result_list.addTab(QListWidget(), "Wii ISOs")
         self.result_list.addTab(QListWidget(), "3DS ROMs")
         self.result_list.addTab(QListWidget(), "WiiU ISOs")
+        self.result_list.addTab(QListWidget(), "Xbox 360 ISOs")
+        self.result_list.addTab(QListWidget(), "Xbox ISOs")
         self.result_list.widget(0).addItems(self.ps3iso_list)
         self.result_list.widget(1).addItems(self.psn_list)
         self.result_list.widget(2).addItems(self.ps2iso_list)
@@ -475,7 +463,8 @@ class GUIDownloader(QWidget):
         self.result_list.widget(14).addItems(self.wii_list)
         self.result_list.widget(15).addItems(self.n3ds_list)
         self.result_list.widget(16).addItems(self.wiiu_list)
-
+        self.result_list.widget(17).addItems(self.xbox360_list)
+        self.result_list.widget(18).addItems(self.xbox_list)
         self.result_list.currentChanged.connect(self.update_add_to_queue_button)
         self.result_list.currentChanged.connect(self.update_results)
         vbox.addWidget(self.result_list)
@@ -485,6 +474,12 @@ class GUIDownloader(QWidget):
         while i != 17:
             self.result_list.setTabVisible(i, False)
             i+=1
+        self.manufacturer.currentIndexChanged.connect(self.manufacturer_selection)
+        #Hide Microsoft Tab by default
+        i = 17
+        while i != 19:
+            self.result_list.setTabVisible(i, False)
+            i+=1   
         self.manufacturer.currentIndexChanged.connect(self.manufacturer_selection)
 
         # Connect the itemSelectionChanged signal to the update_add_to_queue_button method
@@ -505,6 +500,8 @@ class GUIDownloader(QWidget):
         self.result_list.widget(14).itemSelectionChanged.connect(self.update_add_to_queue_button)
         self.result_list.widget(15).itemSelectionChanged.connect(self.update_add_to_queue_button)
         self.result_list.widget(16).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(17).itemSelectionChanged.connect(self.update_add_to_queue_button)
+        self.result_list.widget(18).itemSelectionChanged.connect(self.update_add_to_queue_button)
 
 
         # Allow selecting multiple items
@@ -525,7 +522,8 @@ class GUIDownloader(QWidget):
         self.result_list.widget(14).setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.result_list.widget(15).setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.result_list.widget(16).setSelectionMode(QAbstractItemView.ExtendedSelection)
-
+        self.result_list.widget(17).setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.result_list.widget(18).setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         # Create a horizontal box layout
         hbox = QHBoxLayout()
@@ -655,8 +653,9 @@ class GUIDownloader(QWidget):
         '''
         0: Sony
         1: Nintendo
+        2: Microsoft
         '''
-        manuIndexAssignment = [0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1]
+        manuIndexAssignment = [0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,2,2]
         for i in range(len(manuIndexAssignment)):
             self.result_list.setCurrentIndex(0)
             self.result_list.setTabVisible(i, self.manufacturer.currentIndex() == manuIndexAssignment[i])
@@ -723,8 +722,12 @@ class GUIDownloader(QWidget):
                 file_paths = self.downloadwiizip(item_text, f"{self.processed_items}/{self.total_items}")
             elif item_text in self.n3ds_list:
                 file_paths = self.downloadn3dszip(item_text, f"{self.processed_items}/{self.total_items}")
-            else:
+            elif item_text in self.wiiu_list:
                 file_paths = self.downloadwiiuzip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.xbox360_list:
+                file_paths = self.downloadxbox360zip(item_text, f"{self.processed_items}/{self.total_items}")
+            elif item_text in self.xbox_list:
+                file_paths = self.downloadxboxzip(item_text, f"{self.processed_items}/{self.total_items}")
 
             # Remove the first item from the queue list
             self.queue_list.takeItem(0)
@@ -755,6 +758,13 @@ class GUIDownloader(QWidget):
     def downloadhelper(self, selected_iso, queue_position, url):
         # URL-encode the selected_iso
         selected_iso_encoded = urllib.parse.quote(selected_iso)
+        
+        download_url = f"{url}/{selected_iso_encoded}"
+    
+    # Print the download link
+        print(f"Downloading from: {download_url}")
+        self.output_window.append(f"({queue_position}) Downloading from: {download_url}")
+        
         
         # Load the user's settings
         settings = QSettings('./myrientDownloaderGUI.ini', QSettings.IniFormat)
@@ -1629,6 +1639,87 @@ class GUIDownloader(QWidget):
         # If there are more items in the queue, start the next download
         if self.queue_list.count() > 0:
             self.start_download()
+    
+    def downloadxbox360zip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/Redump/Microsoft - Xbox 360"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+        
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+        
+        # unzip the iso and delete the zip file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+        
+        # rename the extracted .iso file to the original name of the zip file
+        for file in runner.extracted_files:
+            if file.endswith('.iso'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+        # move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.iso')) + glob.glob(os.path.join(self.processing_dir, '*.iso.*')):
+            dst = os.path.join(self.xbox360_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+            
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+        
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+
+        if self.queue_list.count() > 0:
+            self.start_download()
+            
+    def downloadxboxzip(self, selected_iso, queue_position):
+        url = "https://myrient.erista.me/files/Redump/Microsoft - Xbox"
+        base_name = os.path.splitext(selected_iso)[0]
+        file_path = self.downloadhelper(selected_iso, queue_position, url)
+        
+        if not file_path.lower().endswith('.zip'):
+            print(f"File {file_path} is not a .zip file. Skipping unzip.")
+            return
+        self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
+        
+        #unzip the iso and delete the zip file
+        runner = UnzipRunner(file_path, self.processing_dir)
+        runner.progress_signal.connect(self.progress_bar.setValue)
+        runner.start()
+        loop = QEventLoop()
+        runner.finished.connect(loop.quit)
+        loop.exec_()
+        os.remove(file_path)
+        
+        #rename the extracted .iso file to the original name of the zip file
+        for file in runner.extracted_files:
+            if file.endswith('.iso'):
+                new_file_path = os.path.join(self.processing_dir, f"{os.path.splitext(selected_iso)[0]}{os.path.splitext(file)[1]}")
+                os.rename(file, new_file_path)
+        #move the finished file to the output directory
+        for file in glob.glob(os.path.join(self.processing_dir, '*.iso')) + glob.glob(os.path.join(self.processing_dir, '*.iso.*')):
+            dst = os.path.join(self.xbox_dir, os.path.basename(file))
+            if os.path.exists(dst):
+                print(f"File {dst} already exists. Overwriting.")
+            shutil.move(file, dst)
+            
+        self.queue_list.takeItem(0)
+        self.output_window.append(f"({queue_position}) {base_name} ready!")
+        
+        with open('queue.txt', 'wb') as file:
+            pickle.dump([self.queue_list.item(i).text() for i in range(self.queue_list.count())], file)
+        
+        if self.queue_list.count() > 0:
+            self.start_download()
+
 
     def add_to_queue(self):
         selected_items = self.result_list.currentWidget().selectedItems()
@@ -1697,8 +1788,12 @@ class GUIDownloader(QWidget):
             list_to_search = self.wii_list
         elif self.result_list.currentIndex() == 15:
             list_to_search = self.n3ds_list
-        else:
+        elif self.result_list.currentIndex() == 16:
             list_to_search = self.wiiu_list
+        elif self.result_list.currentIndex() == 17:
+            list_to_search = self.xbox360_list
+        elif self.result_list.currentIndex() == 18:
+            list_to_search = self.xbox_list
 
         filtered_list = [item for item in list_to_search if all(word in item.lower() for word in search_term)]
 
@@ -1794,6 +1889,16 @@ class GUIDownloader(QWidget):
         self.wiiu_list = wiiu_list
         self.result_list.widget(16).clear()
         self.result_list.widget(16).addItems(self.wiiu_list)
+
+    def set_xbox360_list(self, xbox360_list):
+        self.xbox360_list = xbox360_list
+        self.result_list.widget(17).clear()
+        self.result_list.widget(17).addItems(self.xbox360_list)
+
+    def set_xbox_list(self, xbox_list):
+        self.xbox_list = xbox_list
+        self.result_list.widget(18).clear()
+        self.result_list.widget(18).addItems(self.xbox_list)
 
     def append_to_output_window(self, text):
         self.output_window.append(text)
@@ -1936,6 +2041,18 @@ class GUIDownloader(QWidget):
         wiiuSelectButton.clicked.connect(lambda: self.open_directory_dialog(gbcPathTextbox, 'wiiu_dir'))
         select_location("WiiU Directory:", wiiuSelectButton, wiiuPathTextbox)
 
+        # Xbox360 section
+        xbox360SelectButton = QPushButton('Choose Xbox360 Directory')
+        xbox360PathTextbox = QLineEdit(self.settings.value('xbox360_dir', 'MyrientDownloads/Xbox360'))
+        xbox360SelectButton.clicked.connect(lambda: self.open_directory_dialog(xbox360PathTextbox, 'xbox360_dir'))
+        select_location("Xbox360 Directory:", xbox360SelectButton, xbox360PathTextbox)
+
+        # Xbox section
+        xboxSelectButton = QPushButton('Choose Xbox Directory')
+        xboxPathTextbox = QLineEdit(self.settings.value('xbox_dir', 'MyrientDownloads/Xbox'))
+        xboxSelectButton.clicked.connect(lambda: self.open_directory_dialog(xboxPathTextbox, 'xbox_dir'))
+        select_location("Xbox Directory:", xboxSelectButton, xboxPathTextbox)
+
         # ISO List section
         if add_iso_list_section:
             iso_list_button = QPushButton('Update software lists')
@@ -2002,6 +2119,10 @@ class GUIDownloader(QWidget):
                 self.n3ds_dir = dirName
             elif setting_key == 'wiiu_dir':
                 self.wiiu_dir = dirName
+            elif setting_key == 'xbox360_dir':
+                self.xbox360_dir = dirName
+            elif setting_key == 'xbox_dir':
+                self.xbox_dir = dirName
 
     def open_settings(self):
         self.settings_welcome_dialog("Tools", "Close", add_iso_list_section=True)
@@ -2028,7 +2149,8 @@ class GUIDownloader(QWidget):
         self.get_wii_list_thread.start()
         self.get_n3ds_list_thread.start()
         self.get_wiiu_list_thread.start()
-
+        self.get_xbox360_list_thread.start()
+        self.get_xbox_list_thread.start()
     def is_valid_binary(self, path, binary_name):
         # Check if the path is not empty, the file exists and the filename ends with the correct binary name
         if path and os.path.isfile(path):
