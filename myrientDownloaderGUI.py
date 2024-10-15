@@ -310,9 +310,9 @@ class GUIDownloader(QWidget):
         os.makedirs(self.wii_dir, exist_ok=True)
         os.makedirs(self.n3ds_dir, exist_ok=True)
         os.makedirs(self.wiiu_dir, exist_ok=True)
-        os.makedirs(self.processing_dir, exist_ok=True)
         os.makedirs(self.xbox360_dir, exist_ok=True)
         os.makedirs(self.xbox_dir, exist_ok=True)
+        os.makedirs(self.processing_dir, exist_ok=True)
         # Check if the saved binary paths exist
         if not os.path.isfile(self.ps3dec_binary):
             self.ps3dec_binary = ''
