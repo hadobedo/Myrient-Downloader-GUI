@@ -1,0 +1,137 @@
+systems:
+  - name: "PSX ISOs"
+    index: 0
+    url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation"
+    file_extension: ".iso"
+    output_dir_key: "psxiso_dir"
+    manufacturer: "Sony"
+    has_multiple_extensions: true
+
+  - name: "PS2 ISOs"
+    index: 1
+    url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202"
+    file_extension: ".iso"
+    output_dir_key: "ps2iso_dir"
+    manufacturer: "Sony"
+    has_multiple_extensions: true
+
+  - name: "PSP ISOs"
+    index: 2
+    url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%20Portable"
+    file_extension: ".iso"
+    output_dir_key: "pspiso_dir"
+    manufacturer: "Sony"
+
+  - name: "PS3 ISOs"
+    index: 3
+    url: "https://dl10.myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203"
+    file_extension: ".iso"
+    output_dir_key: "ps3iso_dir"
+    manufacturer: "Sony"
+    requires_decryption: true  # Custom attribute for special handling
+
+  - name: "PSN PKGs"
+    index: 4
+    url: "https://dl8.myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
+    file_extension: ".pkg"
+    output_dir_key: "psn_pkg_dir"
+    manufacturer: "Sony"
+    requires_pkg_handling: true  # Custom attribute for special handling
+
+  - name: "NES ROMs"
+    index: 5
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%20Entertainment%20System%20%28Headered%29"
+    file_extension: ".nes"
+    output_dir_key: "nes_dir"
+    manufacturer: "Nintendo"
+
+  - name: "GB ROMs"
+    index: 6
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy"
+    file_extension: ".gb"
+    output_dir_key: "gb_dir"
+    manufacturer: "Nintendo"
+
+  - name: "SNES ROMs"
+    index: 7
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System"
+    file_extension: ".sfc"
+    output_dir_key: "snes_dir"
+    manufacturer: "Nintendo"
+
+  - name: "VB ROMs"
+    index: 8
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Virtual%20Boy"
+    file_extension: ".vb"
+    output_dir_key: "vb_dir"
+    manufacturer: "Nintendo"
+
+  - name: "N64 ROMs"
+    index: 9
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%2064%20%28BigEndian%29"
+    file_extension: ".n64"
+    output_dir_key: "n64_dir"
+    manufacturer: "Nintendo"
+
+  - name: "GBC ROMs"
+    index: 10
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Color"
+    file_extension: ".gbc"
+    output_dir_key: "gbc_dir"
+    manufacturer: "Nintendo"
+
+  - name: "GC ISOs"
+    index: 11
+    url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20GameCube%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D"
+    file_extension: ".rvz"
+    output_dir_key: "gc_dir"
+    manufacturer: "Nintendo"
+
+  - name: "GBA ROMs"
+    index: 12
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Advance"
+    file_extension: ".gba"
+    output_dir_key: "gba_dir"
+    manufacturer: "Nintendo"
+
+  - name: "NDS ROMs"
+    index: 13
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%20DS%20%28Decrypted%29"
+    file_extension: ".nds"
+    output_dir_key: "nds_dir"
+    manufacturer: "Nintendo"
+
+  - name: "Wii ISOs"
+    index: 14
+    url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20-%20NKit%20RVZ%20%5Bzstd-19-128k%5D"
+    file_extension: ".rvz"
+    output_dir_key: "wii_dir"
+    manufacturer: "Nintendo"
+
+  - name: "3DS ROMs"
+    index: 15
+    url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%203DS%20%28Decrypted%29"
+    file_extension: ".3ds"
+    output_dir_key: "n3ds_dir"
+    manufacturer: "Nintendo"
+
+  - name: "WiiU ISOs"
+    index: 16
+    url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20U%20-%20WUX"
+    file_extension: ".wux"
+    output_dir_key: "wiiu_dir"
+    manufacturer: "Nintendo"
+
+  - name: "Xbox 360 ISOs"
+    index: 17
+    url: "https://myrient.erista.me/files/Redump/Microsoft%20-%20Xbox%20360"
+    file_extension: ".iso"
+    output_dir_key: "xbox360_dir"
+    manufacturer: "Microsoft"
+
+  - name: "Xbox ISOs"
+    index: 18
+    url: "https://myrient.erista.me/files/Redump/Microsoft%20-%20Xbox"
+    file_extension: ".iso"
+    output_dir_key: "xbox_dir"
+    manufacturer: "Microsoft"
