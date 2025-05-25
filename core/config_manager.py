@@ -7,6 +7,8 @@ class ConfigManager:
     """Manages application configuration loaded from YAML files."""
     
     DEFAULT_CONFIG_PATH = "config/myrient_urls.yaml"
+    # Class variable to track if we've already printed the config loaded message
+    _config_loaded_message_shown = False
     
     def __init__(self, config_file=None):
         self.config_file = config_file or self.DEFAULT_CONFIG_PATH
@@ -19,13 +21,19 @@ class ConfigManager:
         try:
             with open(self.config_file, 'r') as f:
                 self.config = yaml.safe_load(f)
-            # Use sys.stdout.write to ensure it goes through our redirection
-            sys.stdout.write(f"Loaded configuration from {self.config_file}\n")
             
-            # Add message about customizing the config file
-            config_path = os.path.abspath(self.config_file)
-            sys.stdout.write(f"You can easily add other Myrient URLs by editing the YAML file at {config_path}\n")
-            sys.stdout.flush()
+            # Only print the message if it hasn't been shown before
+            if not ConfigManager._config_loaded_message_shown:
+                sys.stdout.write(f"Loaded configuration from {self.config_file}\n")
+                
+                # Add message about customizing the config file
+                config_path = os.path.abspath(self.config_file)
+                sys.stdout.write(f"You can add other URLs by editing the YAML file at {config_path}\n")
+                sys.stdout.flush()
+                
+                # Mark that we've shown the message
+                ConfigManager._config_loaded_message_shown = True
+                
         except Exception as e:
             sys.stderr.write(f"Error loading configuration: {str(e)}\n")
             sys.stderr.flush()

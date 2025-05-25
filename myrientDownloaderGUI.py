@@ -2,9 +2,9 @@
 import sys
 import os
 import platform
-from PyQt5.QtWidgets import QApplication, QMessageBox, QDialog
+from PyQt5.QtWidgets import QApplication, QMessageBox, QDialog, QStyleFactory
 from PyQt5.QtCore import Qt, QCoreApplication
-from PyQt5.QtGui import QFontDatabase
+from PyQt5.QtGui import QFontDatabase, QPalette, QColor
 
 from gui.main_window import GUIDownloader
 from core.settings import SettingsManager
@@ -82,6 +82,227 @@ def check_ps3dec(app):
         )
         return True  # Continue anyway when user cancels
 
+def apply_system_theme(app):
+    """Apply system theme (light or dark mode) to the application."""
+    # Check if system is using dark mode
+    dark_mode = False
+    
+    # Detect dark mode on different platforms
+    if platform.system() == 'Windows':
+        try:
+            import winreg
+            registry = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
+            key = winreg.OpenKey(registry, r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize')
+            dark_mode = 1 - winreg.QueryValueEx(key, 'AppsUseLightTheme')[0]  # 0 is light, 1 is dark
+        except Exception as e:
+            dark_mode = False
+    elif platform.system() == 'Darwin':  # macOS
+        try:
+            import subprocess
+            cmd = 'defaults read -g AppleInterfaceStyle'
+            result = subprocess.run(cmd, shell=True, text=True, capture_output=True)
+            dark_mode = result.stdout.strip() == 'Dark'
+        except Exception as e:
+            dark_mode = False
+    elif platform.system() == 'Linux':
+        # Try to detect dark mode on Linux
+        # This is more complex due to the variety of desktop environments
+        try:
+            # Check various environment variables
+            color_scheme = os.environ.get('GTK_THEME', '').lower()
+            desktop_env = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+            
+            if 'dark' in color_scheme:
+                dark_mode = True
+            elif desktop_env in ['gnome', 'unity']:
+                import subprocess
+                # Check GNOME color scheme
+                cmd = 'gsettings get org.gnome.desktop.interface color-scheme'
+                result = subprocess.run(cmd, shell=True, text=True, capture_output=True)
+                dark_mode = 'dark' in result.stdout.lower()
+            elif desktop_env == 'kde':
+                import subprocess
+                # Check KDE color scheme
+                cmd = 'kreadconfig5 --group Colors:Window --key BackgroundNormal'
+                result = subprocess.run(cmd, shell=True, text=True, capture_output=True)
+                # If the background color is dark, assume dark mode
+                color_value = result.stdout.strip()
+                if color_value:
+                    try:
+                        r, g, b = map(int, color_value.split(','))
+                        # Simple brightness calculation
+                        brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                        dark_mode = brightness < 0.5
+                    except:
+                        dark_mode = False
+        except Exception as e:
+            dark_mode = False
+    
+    if dark_mode:
+        # Apply dark palette
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(53, 53, 53))
+        palette.setColor(QPalette.WindowText, Qt.white)
+        palette.setColor(QPalette.Base, QColor(35, 35, 35))
+        palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+        palette.setColor(QPalette.ToolTipBase, QColor(25, 25, 25))
+        palette.setColor(QPalette.ToolTipText, Qt.white)
+        palette.setColor(QPalette.Text, Qt.white)
+        palette.setColor(QPalette.Button, QColor(53, 53, 53))
+        palette.setColor(QPalette.ButtonText, Qt.white)
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Link, QColor(42, 130, 218))
+        palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        palette.setColor(QPalette.HighlightedText, Qt.black)
+        app.setPalette(palette)
+        
+        # Set stylesheet for additional elements
+        app.setStyleSheet("""
+            QToolTip { color: #ffffff; background-color: #2a2a2a; border: 1px solid #767676; }
+            QListWidget { background-color: #2d2d2d; color: #ffffff; }
+            QListView::item:selected { background-color: #2a82da; }
+            QTabWidget::pane { border: 1px solid #767676; }
+            QTabBar::tab { background-color: #3c3c3c; color: #ffffff; }
+            QTabBar::tab:selected { background-color: #4c4c4c; }
+            QLineEdit { background-color: #2d2d2d; color: #ffffff; border: 1px solid #767676; }
+            QTextEdit { background-color: #2d2d2d; color: #ffffff; }
+            QProgressBar { border: 1px solid #767676; background-color: #2d2d2d; }
+            QProgressBar::chunk { background-color: #2a82da; }
+            QCheckBox { color: #ffffff; }
+            QRadioButton { color: #ffffff; }
+            QGroupBox { color: #ffffff; border: 1px solid #767676; }
+            QPushButton { background-color: #3c3c3c; color: #ffffff; border: 1px solid #767676; padding: 5px; }
+            QPushButton:hover { background-color: #4c4c4c; }
+            QPushButton:pressed { background-color: #2a82da; }
+            
+            /* Scrollbar styling for dark theme */
+            QScrollBar:vertical {
+                background-color: #2d2d2d;
+                width: 14px;
+                margin: 15px 3px 15px 3px;
+                border: 1px solid #2d2d2d;
+                border-radius: 4px;
+            }
+            
+            QScrollBar::handle:vertical {
+                background-color: #555555;
+                min-height: 30px;
+                border-radius: 4px;
+            }
+            
+            QScrollBar::handle:vertical:hover {
+                background-color: #666666;
+            }
+            
+            QScrollBar::handle:vertical:pressed {
+                background-color: #777777;
+            }
+            
+            QScrollBar::sub-line:vertical {
+                border: none;
+                background-color: #3c3c3c;
+                height: 15px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                subcontrol-position: top;
+                subcontrol-origin: margin;
+            }
+            
+            QScrollBar::add-line:vertical {
+                border: none;
+                background-color: #3c3c3c;
+                height: 15px;
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
+                subcontrol-position: bottom;
+                subcontrol-origin: margin;
+            }
+            
+            QScrollBar::sub-line:vertical:hover,
+            QScrollBar::add-line:vertical:hover {
+                background-color: #4c4c4c;
+            }
+            
+            QScrollBar::sub-line:vertical:pressed,
+            QScrollBar::add-line:vertical:pressed {
+                background-color: #2a82da;
+            }
+            
+            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+                background: none;
+            }
+            
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background-color: #2d2d2d;
+            }
+            
+            /* Horizontal scrollbar styling */
+            QScrollBar:horizontal {
+                background-color: #2d2d2d;
+                height: 14px;
+                margin: 3px 15px 3px 15px;
+                border: 1px solid #2d2d2d;
+                border-radius: 4px;
+            }
+            
+            QScrollBar::handle:horizontal {
+                background-color: #555555;
+                min-width: 30px;
+                border-radius: 4px;
+            }
+            
+            QScrollBar::handle:horizontal:hover {
+                background-color: #666666;
+            }
+            
+            QScrollBar::handle:horizontal:pressed {
+                background-color: #777777;
+            }
+            
+            QScrollBar::sub-line:horizontal {
+                border: none;
+                background-color: #3c3c3c;
+                width: 15px;
+                border-top-left-radius: 4px;
+                border-bottom-left-radius: 4px;
+                subcontrol-position: left;
+                subcontrol-origin: margin;
+            }
+            
+            QScrollBar::add-line:horizontal {
+                border: none;
+                background-color: #3c3c3c;
+                width: 15px;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                subcontrol-position: right;
+                subcontrol-origin: margin;
+            }
+            
+            QScrollBar::sub-line:horizontal:hover,
+            QScrollBar::add-line:horizontal:hover {
+                background-color: #4c4c4c;
+            }
+            
+            QScrollBar::sub-line:horizontal:pressed,
+            QScrollBar::add-line:horizontal:pressed {
+                background-color: #2a82da;
+            }
+            
+            QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
+                background: none;
+            }
+            
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background-color: #2d2d2d;
+            }
+        """)
+    else:
+        # Use default light theme
+        app.setStyle(QStyleFactory.create("Fusion"))
+        app.setPalette(app.style().standardPalette())
+        app.setStyleSheet("")
+
 def main():
     """Main entry point for the application."""
     
@@ -100,6 +321,9 @@ def main():
     
     # Initialize application
     app = QApplication(sys.argv)
+    
+    # Apply system theme
+    apply_system_theme(app)
     
     # Check for ps3dec on Windows
     check_ps3dec(app)  # We always continue now, regardless of the return value
