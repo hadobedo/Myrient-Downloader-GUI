@@ -2,7 +2,7 @@
 import sys
 import os
 import platform
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMessageBox, QDialog
 from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QFontDatabase
 
@@ -65,17 +65,22 @@ def check_ps3dec(app):
                     "Download Failed", 
                     "Failed to download PS3Dec. Please try again later."
                 )
-                return False
+                return True  # Continue even if download failed
         except Exception as e:
             QMessageBox.critical(
                 None, 
                 "Download Error", 
                 f"Error downloading PS3Dec: {str(e)}"
             )
-            return False
+            return True  # Continue despite error
     else:
-        # User cancelled
-        return False
+        # User cancelled - just show a warning
+        QMessageBox.warning(
+            None,
+            "Limited Functionality",
+            "PS3Dec was not downloaded. PS3 ISO decryption functionality will be limited."
+        )
+        return True  # Continue anyway when user cancels
 
 def main():
     """Main entry point for the application."""
@@ -97,9 +102,7 @@ def main():
     app = QApplication(sys.argv)
     
     # Check for ps3dec on Windows
-    if not check_ps3dec(app):
-        print("PS3Dec check failed or cancelled by user. Exiting application.")
-        return 1
+    check_ps3dec(app)  # We always continue now, regardless of the return value
     
     # Create main window
     ex = GUIDownloader()
