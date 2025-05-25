@@ -80,13 +80,19 @@ class SettingsManager:
     def download_ps3dec(self):
         """Download the PS3Dec binary (Windows only)."""
         if platform.system() == 'Windows':
-            urllib.request.urlretrieve(
-                "https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe", 
-                "ps3dec.exe"
-            )
-            self.ps3dec_binary = os.path.join(os.getcwd(), "ps3dec.exe")
-            self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
-            return True
+            try:
+                print("Downloading PS3Dec from GitHub...")
+                urllib.request.urlretrieve(
+                    "https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe", 
+                    "ps3dec.exe"
+                )
+                self.ps3dec_binary = os.path.join(os.getcwd(), "ps3dec.exe")
+                self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
+                print("PS3Dec downloaded successfully")
+                return True
+            except Exception as e:
+                print(f"Error downloading PS3Dec: {str(e)}")
+                return False
         return False
     
     def update_setting(self, key, value):
