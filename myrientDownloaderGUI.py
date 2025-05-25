@@ -14,6 +14,9 @@ from gui.ps3dec_dialog import PS3DecDownloadDialog
 QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
+# Global variable to track dark mode state
+is_dark_mode = False
+
 # Capture early output
 class OutputBuffer:
     def __init__(self):
@@ -34,6 +37,46 @@ class OutputBuffer:
             output_window.append_text(text)
         self.buffer = []
 
+def style_dialog_for_dark_mode(dialog):
+    """Apply dark mode styling to a dialog if dark mode is active."""
+    global is_dark_mode
+    if not is_dark_mode:
+        return dialog
+        
+    # Apply dark styling to the dialog
+    dialog.setStyleSheet("""
+        QMessageBox {
+            background-color: #2d2d2d;
+            color: #ffffff;
+        }
+        QLabel {
+            color: #ffffff;
+        }
+        QPushButton {
+            background-color: #3c3c3c;
+            color: #ffffff;
+            border: 1px solid #767676;
+            padding: 5px;
+            border-radius: 2px;
+        }
+        QPushButton:hover {
+            background-color: #4c4c4c;
+        }
+        QPushButton:pressed {
+            background-color: #2a82da;
+        }
+    """)
+    return dialog
+    
+def show_styled_message_box(icon, title, text, parent=None):
+    """Show a message box with proper styling based on system theme."""
+    msg_box = QMessageBox(parent)
+    msg_box.setIcon(icon)
+    msg_box.setWindowTitle(title)
+    msg_box.setText(text)
+    style_dialog_for_dark_mode(msg_box)
+    return msg_box.exec_()
+
 def check_ps3dec(app):
     """Check if PS3Dec is available and prompt to download if not."""
     if platform.system() != 'Windows':
@@ -47,36 +90,41 @@ def check_ps3dec(app):
     
     # PS3Dec not found, show dialog
     dialog = PS3DecDownloadDialog()
+    style_dialog_for_dark_mode(dialog)
     result = dialog.exec_()
     
     if result == QDialog.Accepted:
         # User clicked download
         try:
             if settings_manager.download_ps3dec():
-                QMessageBox.information(
-                    None, 
+                # Use styled message box
+                show_styled_message_box(
+                    QMessageBox.Information, 
                     "Download Complete", 
                     "PS3Dec was downloaded successfully."
                 )
                 return True
             else:
-                QMessageBox.critical(
-                    None, 
+                # Use styled message box
+                show_styled_message_box(
+                    QMessageBox.Critical, 
                     "Download Failed", 
                     "Failed to download PS3Dec. Please try again later."
                 )
                 return True  # Continue even if download failed
         except Exception as e:
-            QMessageBox.critical(
-                None, 
+            # Use styled message box
+            show_styled_message_box(
+                QMessageBox.Critical, 
                 "Download Error", 
                 f"Error downloading PS3Dec: {str(e)}"
             )
             return True  # Continue despite error
     else:
         # User cancelled - just show a warning
-        QMessageBox.warning(
-            None,
+        # Use styled message box
+        show_styled_message_box(
+            QMessageBox.Warning,
             "Limited Functionality",
             "PS3Dec was not downloaded. PS3 ISO decryption functionality will be limited."
         )
@@ -85,6 +133,7 @@ def check_ps3dec(app):
 def apply_system_theme(app):
     """Apply system theme (light or dark mode) to the application."""
     # Check if system is using dark mode
+    global is_dark_mode
     dark_mode = False
     
     # Detect dark mode on different platforms
@@ -137,6 +186,9 @@ def apply_system_theme(app):
                         dark_mode = False
         except Exception as e:
             dark_mode = False
+    
+    # Set global dark mode flag
+    is_dark_mode = dark_mode
     
     if dark_mode:
         # Apply dark palette

@@ -397,19 +397,24 @@ class GUIDownloader(QWidget):
         """Create the options layout with sections for general and platform-specific options."""
         # Create group box for general options
         general_options_group = QGroupBox("General Options")
-        general_layout = QHBoxLayout()  # Changed to horizontal layout
+        general_layout = QHBoxLayout()  # Horizontal layout
         
-        # Add general options (always visible)
+        # Add general options (always visible) with stretches for even spacing
+        general_layout.addStretch(1)  # Start with stretch for even spacing
+        
         self.split_checkbox = QCheckBox('Split for FAT32 (if > 4GB)', self)
         self.split_checkbox.setChecked(True)
+        self.split_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
+        self.split_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
         general_layout.addWidget(self.split_checkbox)
+        general_layout.addStretch(1)  # Add stretch between checkboxes
         
         self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit file', self)
         self.keep_unsplit_dec_checkbox.setChecked(False)
+        self.keep_unsplit_dec_checkbox.setMinimumWidth(140)  # Set minimum width to prevent text cutting
+        self.keep_unsplit_dec_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
         general_layout.addWidget(self.keep_unsplit_dec_checkbox)
-        
-        # Add stretch to push checkboxes to the left
-        general_layout.addStretch()
+        general_layout.addStretch(1)  # End with stretch for even spacing
         
         general_options_group.setLayout(general_layout)
         parent_layout.addWidget(general_options_group)
@@ -420,37 +425,48 @@ class GUIDownloader(QWidget):
         
         # PS3 specific options
         self.ps3_options_widget = QWidget()
-        ps3_layout = QHBoxLayout(self.ps3_options_widget)  # Changed to horizontal layout
+        ps3_layout = QHBoxLayout(self.ps3_options_widget)  # Horizontal layout
         ps3_layout.setContentsMargins(0, 0, 0, 0)
+        
+        ps3_layout.addStretch(1)  # Start with stretch for even spacing
         
         self.decrypt_checkbox = QCheckBox('Decrypt using PS3Dec', self)
         self.decrypt_checkbox.setChecked(True)
+        self.decrypt_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
+        self.decrypt_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
         ps3_layout.addWidget(self.decrypt_checkbox)
+        ps3_layout.addStretch(1)  # Add stretch between checkboxes
         
         self.keep_enc_checkbox = QCheckBox('Keep encrypted PS3 ISO', self)
         self.keep_enc_checkbox.setChecked(False)
+        self.keep_enc_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
+        self.keep_enc_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
         ps3_layout.addWidget(self.keep_enc_checkbox)
+        ps3_layout.addStretch(1)  # Add stretch between checkboxes
         
         self.keep_dkey_checkbox = QCheckBox('Keep PS3 ISO dkey file', self)
         self.keep_dkey_checkbox.setChecked(False)
+        self.keep_dkey_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
+        self.keep_dkey_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
         ps3_layout.addWidget(self.keep_dkey_checkbox)
-        
-        # Add stretch to push checkboxes to the left
-        ps3_layout.addStretch()
+        ps3_layout.addStretch(1)  # End with stretch for even spacing
         
         platform_layout.addWidget(self.ps3_options_widget)
         
         # PSN specific options
         self.psn_options_widget = QWidget()
-        psn_layout = QHBoxLayout(self.psn_options_widget)  # Changed to horizontal layout
+        psn_layout = QHBoxLayout(self.psn_options_widget)  # Horizontal layout
         psn_layout.setContentsMargins(0, 0, 0, 0)
+        
+        psn_layout.addStretch(1)  # Start with stretch for even spacing
         
         self.split_pkg_checkbox = QCheckBox('Split PKG', self)
         self.split_pkg_checkbox.setChecked(True)
+        self.split_pkg_checkbox.setMinimumWidth(100)  # Set minimum width to prevent text cutting
+        self.split_pkg_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
         psn_layout.addWidget(self.split_pkg_checkbox)
         
-        # Add stretch to push checkboxes to the left
-        psn_layout.addStretch()
+        psn_layout.addStretch(1)  # End with stretch for even spacing
         
         platform_layout.addWidget(self.psn_options_widget)
         
