@@ -32,3 +32,6 @@ splitps3iso*
 # ignore game folders
 MyrientDownloads/
 processing/
+
+# ignore __pycache__
+__pycache__/
