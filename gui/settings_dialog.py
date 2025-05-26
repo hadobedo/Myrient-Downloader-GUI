@@ -46,6 +46,29 @@ class SettingsDialog(QDialog):
         ps3dec_layout.addWidget(ps3dec_browse)
         
         general_layout.addRow("PS3Dec Binary:", ps3dec_layout)
+        
+        # Add extractps3iso binary setting
+        self.extractps3iso_path = QLineEdit(self.settings_manager.extractps3iso_binary)
+        extractps3iso_browse = QPushButton("Browse...")
+        extractps3iso_browse.clicked.connect(lambda: self.browse_executable("PS3 ISO Extractor", self.extractps3iso_path))
+        
+        extractps3iso_layout = QHBoxLayout()
+        extractps3iso_layout.addWidget(self.extractps3iso_path)
+        extractps3iso_layout.addWidget(extractps3iso_browse)
+        
+        general_layout.addRow("extractps3iso Binary:", extractps3iso_layout)
+        
+        # Add Processing Directory
+        self.processing_path = QLineEdit(self.settings_manager.processing_dir)
+        processing_browse = QPushButton("Browse...")
+        processing_browse.clicked.connect(lambda: self.browse_directory(self.processing_path))
+        
+        processing_layout = QHBoxLayout()
+        processing_layout.addWidget(self.processing_path)
+        processing_layout.addWidget(processing_browse)
+        
+        general_layout.addRow("Processing Directory:", processing_layout)
+        
         general_group.setLayout(general_layout)
         
         scroll_layout.addWidget(general_group)
@@ -168,6 +191,12 @@ class SettingsDialog(QDialog):
         try:
             # Save PS3Dec path
             self.settings_manager.update_setting('ps3dec_binary', self.ps3dec_path.text())
+            
+            # Save extractps3iso binary path
+            self.settings_manager.update_setting('extractps3iso_binary', self.extractps3iso_path.text())
+            
+            # Save processing directory
+            self.settings_manager.update_setting('processing_dir', self.processing_path.text())
             
             # Save all platform paths
             for attr_name, line_edit in self.platform_paths.items():

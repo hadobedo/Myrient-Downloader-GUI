@@ -11,8 +11,7 @@ Features:
 Usage:
 1. [Download the latest release for your platform](https://github.com/hadobedo/Myrient-Downloader-GUI/releases/latest)
 2. Run the exe
-
-On first run the user must download/specify location of PS3Dec and optionally set destination folders for downloaded software
+3. (If on Windows) On first run the software will prompt the user to automatically download [`PS3Dec`](https://github.com/Redrrx/ps3dec) & [`ps3iso-utils`](https://github.com/bucanero/ps3iso-utils) for their platform.
 
 To run the script as a .py file:
 1. Clone repo & cd into folder `git clone https://github.com/hadobedo/Myrient-Downloader-GUI/ && cd Myrient-Downloader-GUI/`
@@ -23,13 +22,13 @@ Requirements on Arch Linux can be installed like so:
 `sudo pacman -S python-aiohttp python-beautifulsoup4 python-pyqt5 python-requests`
 
 PS3Dec is available from the AUR as [`ps3dec-git`](https://aur.archlinux.org/packages/ps3dec-git)
-Instructions to build PS3Dec on Linux [can be found here](https://github.com/al3xtjames/PS3Dec)
+ps3iso-utils is available from the AUR as [`ps3iso-utils-git`](https://aur.archlinux.org/packages/ps3iso-utils-git)
 
 Credits/Binaries used:
 - [Myrient Video Game Preservationists](https://myrient.erista.me) [[Donation Link]](https://myrient.erista.me/donate/)
 - [Redrrx's PS3Dec rewrite in Rust](https://github.com/Redrrx/ps3dec)
 - [gotbletu's `ps3-split-iso` and `ps3-split-pkg` scripts 'ported'/adapted into Python)](https://github.com/gotbletu/shownotes/blob/master/ps3_split_merge_games.md)
-- [bucanero's ps3iso-utils](https://github.com/bucanero/ps3iso-utils) (used their splitps3iso binary in the past)
+- [bucanero's ps3iso-utils](https://github.com/bucanero/ps3iso-utils) (use their `extractps3iso`)
 - gpt-4 :)
 
 TODO:

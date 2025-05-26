@@ -8,7 +8,7 @@ from PyQt5.QtGui import QFontDatabase, QPalette, QColor
 
 from gui.main_window import GUIDownloader
 from core.settings import SettingsManager
-from gui.ps3dec_dialog import PS3DecDownloadDialog
+from gui.check_prereq_binaries_dialog import PrereqBinaryDialog
 
 # Set Qt attributes before creating QApplication
 QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -36,6 +36,12 @@ class OutputBuffer:
         for text in self.buffer:
             output_window.append_text(text)
         self.buffer = []
+        
+    # Add a method to properly handle stderr
+    def stderr_write(self, text):
+        """Write to the buffer and original stderr."""
+        self.buffer.append(text)
+        self.orig_stderr.write(text)
 
 def style_dialog_for_dark_mode(dialog):
     """Apply dark mode styling to a dialog if dark mode is active."""
@@ -89,7 +95,7 @@ def check_ps3dec(app):
         return True
     
     # PS3Dec not found, show dialog
-    dialog = PS3DecDownloadDialog()
+    dialog = PrereqBinaryDialog("ps3dec")
     style_dialog_for_dark_mode(dialog)
     result = dialog.exec_()
     

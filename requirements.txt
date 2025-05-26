@@ -4,3 +4,4 @@ beautifulsoup4>=4.9.3
 PyQt5>=5.15.2
 requests>=2.25.1
 PyYAML>=6.0
+pycdlib>=1.10.0

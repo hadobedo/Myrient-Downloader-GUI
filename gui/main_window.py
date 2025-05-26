@@ -18,6 +18,7 @@ from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop
 from PyQt5.QtGui import QFont, QBrush, QColor
 
 from gui.output_window import OutputWindow
+from gui.check_prereq_binaries_dialog import PrereqBinaryDialog
 from core.settings import SettingsManager
 from core.downloader import Downloader
 from core.state_manager import StateManager
@@ -38,7 +39,7 @@ class SettingsDialog(QDialog):
         self.layout = QGridLayout(self)
         self.inputs = {}
 
-        # Move PS3Dec Binary to the top
+        # Add PS3Dec Binary and extractps3iso Binary on the same row
         row = 0
         self.layout.addWidget(QLabel("PS3Dec Binary"), row, 0)
         ps3dec_le = QLineEdit(str(getattr(settings_manager, "ps3dec_binary", "")))
@@ -49,9 +50,20 @@ class SettingsDialog(QDialog):
         ps3dec_browse_btn = QPushButton("Browse")
         ps3dec_browse_btn.clicked.connect(lambda: self.browse_file(ps3dec_le))
         self.layout.addWidget(ps3dec_browse_btn, row, 2)
+
+        # Add extractps3iso Binary on same row
+        self.layout.addWidget(QLabel("extractps3iso Binary"), row, 3)
+        extractps3iso_le = QLineEdit(str(getattr(settings_manager, "extractps3iso_binary", "")))
+        self.layout.addWidget(extractps3iso_le, row, 4)
+        self.inputs["extractps3iso_binary"] = extractps3iso_le
+        
+        # Add browse button for extractps3iso Binary
+        extractps3iso_browse_btn = QPushButton("Browse")
+        extractps3iso_browse_btn.clicked.connect(lambda: self.browse_file(extractps3iso_le))
+        self.layout.addWidget(extractps3iso_browse_btn, row, 5)
         row += 1
 
-        # Hardcoded platforms and their settings keys (excluding PS3Dec)
+        # Hardcoded platforms and their settings keys (excluding the binaries which we've already added)
         hardcoded = [
             ("PS3 ISO Directory", "ps3iso_dir"),
             ("PSN PKG Directory", "psn_pkg_dir"),
@@ -250,19 +262,53 @@ class GUIDownloader(QWidget):
 
     def load_queue(self):
         """Load the download queue from file."""
-        if os.path.exists('queue.txt'):
+        # Set path to queue file in config directory
+        config_dir = "config"
+        queue_file = os.path.join(config_dir, "queue.txt")
+        
+        # First check if the new location exists
+        if os.path.exists(queue_file):
             try:
-                with open('queue.txt', 'rb') as file:
+                with open(queue_file, 'rb') as file:
                     self.queue = pickle.load(file)
             except Exception as e:
-                print(f"Error loading queue.txt: {e}. Starting with an empty queue.")
+                print(f"Error loading {queue_file}: {e}. Starting with an empty queue.")
                 self.queue = []
         else:
-            self.queue = []
+            # Check for old file in root directory
+            old_queue_file = "queue.txt"
+            if os.path.exists(old_queue_file):
+                try:
+                    # Load from old location
+                    with open(old_queue_file, 'rb') as file:
+                        self.queue = pickle.load(file)
+                    
+                    # Ensure config directory exists
+                    os.makedirs(config_dir, exist_ok=True)
+                    
+                    # Save to new location
+                    with open(queue_file, 'wb') as file:
+                        pickle.dump(self.queue, file)
+                    
+                    # Remove old file after successful migration
+                    os.remove(old_queue_file)
+                    print(f"Migrated queue from root to {queue_file}")
+                except Exception as e:
+                    print(f"Error migrating queue: {str(e)}")
+                    self.queue = []
+            else:
+                self.queue = []
     
     def save_queue(self):
         """Save the current queue to file."""
-        with open('queue.txt', 'wb') as file:
+        # Ensure config directory exists
+        config_dir = "config"
+        os.makedirs(config_dir, exist_ok=True)
+        
+        # Save to new location in config directory
+        queue_file = os.path.join(config_dir, "queue.txt")
+        
+        with open(queue_file, 'wb') as file:
             # Save original names (Qt.UserRole data)
             queue_items = []
             for i in range(self.queue_list.count()):
@@ -375,13 +421,45 @@ class GUIDownloader(QWidget):
         self.progress_bar = QProgressBar(self)
         vbox.addWidget(self.progress_bar)
 
-        queue_header = QLabel('Download Speed & ETA')
-        vbox.addWidget(queue_header)
-
+        # Create horizontal layout for download status information
+        download_status_layout = QHBoxLayout()
+        
+        # Left side for speed and ETA
+        status_left = QVBoxLayout()
+        
+        download_info_header = QLabel('Download Speed & ETA')
+        status_left.addWidget(download_info_header)
+        
         self.download_speed_label = QLabel(self)
-        vbox.addWidget(self.download_speed_label)
+        status_left.addWidget(self.download_speed_label)
+        
         self.download_eta_label = QLabel(self)
-        vbox.addWidget(self.download_eta_label)
+        status_left.addWidget(self.download_eta_label)
+        
+        download_status_layout.addLayout(status_left)
+        
+        # Add stretch to push the file size to the right
+        download_status_layout.addStretch()
+        
+        # Right side for file size
+        status_right = QVBoxLayout()
+        
+        filesize_header = QLabel('File Size')
+        filesize_header.setAlignment(Qt.AlignRight)
+        status_right.addWidget(filesize_header)
+        
+        self.download_size_label = QLabel(self)
+        self.download_size_label.setAlignment(Qt.AlignRight)
+        status_right.addWidget(self.download_size_label)
+        
+        # Add an empty label to align with ETA label
+        empty_label = QLabel(self)
+        status_right.addWidget(empty_label)
+        
+        download_status_layout.addLayout(status_right)
+        
+        # Add the horizontal layout to the main vertical layout
+        vbox.addLayout(download_status_layout)
 
         self.setLayout(vbox)
 
@@ -397,76 +475,90 @@ class GUIDownloader(QWidget):
         """Create the options layout with sections for general and platform-specific options."""
         # Create group box for general options
         general_options_group = QGroupBox("General Options")
-        general_layout = QHBoxLayout()  # Horizontal layout
+        # Add padding to the group box title with style sheet
+        general_options_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; }")
+        general_layout = QVBoxLayout()
         
-        # Add general options (always visible) with stretches for even spacing
-        general_layout.addStretch(1)  # Start with stretch for even spacing
+        # Create a grid layout for general options
+        general_grid = QGridLayout()
+        general_grid.setHorizontalSpacing(20)  # Space between columns
+        general_grid.setVerticalSpacing(10)    # Space between rows
         
+        # Add general options - Keep related options next to each other
+        row = 0
         self.split_checkbox = QCheckBox('Split for FAT32 (if > 4GB)', self)
-        self.split_checkbox.setChecked(True)
-        self.split_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
-        self.split_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
-        general_layout.addWidget(self.split_checkbox)
-        general_layout.addStretch(1)  # Add stretch between checkboxes
+        self.split_checkbox.setChecked(self.settings_manager.split_large_files)
+        general_grid.addWidget(self.split_checkbox, row, 0)
         
         self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit file', self)
-        self.keep_unsplit_dec_checkbox.setChecked(False)
-        self.keep_unsplit_dec_checkbox.setMinimumWidth(140)  # Set minimum width to prevent text cutting
-        self.keep_unsplit_dec_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
-        general_layout.addWidget(self.keep_unsplit_dec_checkbox)
-        general_layout.addStretch(1)  # End with stretch for even spacing
+        self.keep_unsplit_dec_checkbox.setChecked(self.settings_manager.keep_unsplit_file)
+        general_grid.addWidget(self.keep_unsplit_dec_checkbox, row, 1)
         
+        # Add the grid layout to the main layout
+        general_layout.addLayout(general_grid)
         general_options_group.setLayout(general_layout)
         parent_layout.addWidget(general_options_group)
         
         # Create group box for platform-specific options
         self.platform_options_group = QGroupBox("Platform-Specific Options")
-        platform_layout = QVBoxLayout()  # Keep this vertical to separate different platform options
+        self.platform_options_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; }")
+        platform_layout = QVBoxLayout()
         
         # PS3 specific options
         self.ps3_options_widget = QWidget()
-        ps3_layout = QHBoxLayout(self.ps3_options_widget)  # Horizontal layout
+        ps3_layout = QVBoxLayout(self.ps3_options_widget)
         ps3_layout.setContentsMargins(0, 0, 0, 0)
         
-        ps3_layout.addStretch(1)  # Start with stretch for even spacing
+        # Create a grid layout for PS3 options with better organization and visual hierarchy
+        ps3_grid = QGridLayout()
+        ps3_grid.setHorizontalSpacing(20)
+        ps3_grid.setVerticalSpacing(10)
         
+        # First row - main decrypt checkbox with its direct related options
+        row = 0
         self.decrypt_checkbox = QCheckBox('Decrypt using PS3Dec', self)
-        self.decrypt_checkbox.setChecked(True)
-        self.decrypt_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
-        self.decrypt_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
-        ps3_layout.addWidget(self.decrypt_checkbox)
-        ps3_layout.addStretch(1)  # Add stretch between checkboxes
+        self.decrypt_checkbox.setChecked(self.settings_manager.decrypt_iso)
+        ps3_grid.addWidget(self.decrypt_checkbox, row, 0)
         
         self.keep_enc_checkbox = QCheckBox('Keep encrypted PS3 ISO', self)
-        self.keep_enc_checkbox.setChecked(False)
-        self.keep_enc_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
-        self.keep_enc_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
-        ps3_layout.addWidget(self.keep_enc_checkbox)
-        ps3_layout.addStretch(1)  # Add stretch between checkboxes
+        self.keep_enc_checkbox.setChecked(self.settings_manager.keep_encrypted_iso)
+        ps3_grid.addWidget(self.keep_enc_checkbox, row, 1)
         
+        # Second row - Extract ISO contents checkbox
+        row += 1
+        self.extract_ps3_checkbox = QCheckBox('Extract ISO contents', self)
+        self.extract_ps3_checkbox.setChecked(self.settings_manager.extract_ps3_iso)
+        ps3_grid.addWidget(self.extract_ps3_checkbox, row, 0, 1, 2)  # Span 2 columns
+        
+        # Third row - Keep decrypted ISO checkbox
+        row += 1
+        self.keep_decrypted_iso_checkbox = QCheckBox('Keep decrypted ISO after extraction', self)
+        self.keep_decrypted_iso_checkbox.setChecked(self.settings_manager.keep_decrypted_iso_after_extraction)
+        ps3_grid.addWidget(self.keep_decrypted_iso_checkbox, row, 0, 1, 2)  # Span 2 columns
+        
+        # Separate row just for the dkey checkbox with clear separation
+        row += 1
+        # Add a small spacer before the dkey checkbox for visual separation
+        ps3_grid.setRowMinimumHeight(row, 5)  # 5px spacing
+        
+        row += 1
         self.keep_dkey_checkbox = QCheckBox('Keep PS3 ISO dkey file', self)
-        self.keep_dkey_checkbox.setChecked(False)
-        self.keep_dkey_checkbox.setMinimumWidth(180)  # Set minimum width to prevent text cutting
-        self.keep_dkey_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
-        ps3_layout.addWidget(self.keep_dkey_checkbox)
-        ps3_layout.addStretch(1)  # End with stretch for even spacing
-        
+        self.keep_dkey_checkbox.setChecked(self.settings_manager.keep_dkey_file)
+        # Place in first column, and make it span two columns for clarity
+        ps3_grid.addWidget(self.keep_dkey_checkbox, row, 0, 1, 2)
+    
+        # Add PS3 grid to PS3 layout
+        ps3_layout.addLayout(ps3_grid)
         platform_layout.addWidget(self.ps3_options_widget)
         
         # PSN specific options
         self.psn_options_widget = QWidget()
-        psn_layout = QHBoxLayout(self.psn_options_widget)  # Horizontal layout
+        psn_layout = QGridLayout(self.psn_options_widget)
         psn_layout.setContentsMargins(0, 0, 0, 0)
         
-        psn_layout.addStretch(1)  # Start with stretch for even spacing
-        
         self.split_pkg_checkbox = QCheckBox('Split PKG', self)
-        self.split_pkg_checkbox.setChecked(True)
-        self.split_pkg_checkbox.setMinimumWidth(100)  # Set minimum width to prevent text cutting
-        self.split_pkg_checkbox.setStyleSheet("QCheckBox { padding: 2px; }")  # Add padding
-        psn_layout.addWidget(self.split_pkg_checkbox)
-        
-        psn_layout.addStretch(1)  # End with stretch for even spacing
+        self.split_pkg_checkbox.setChecked(self.settings_manager.split_pkg)
+        psn_layout.addWidget(self.split_pkg_checkbox, 0, 0)
         
         platform_layout.addWidget(self.psn_options_widget)
         
@@ -476,56 +568,134 @@ class GUIDownloader(QWidget):
         self.platform_options_group.setLayout(platform_layout)
         parent_layout.addWidget(self.platform_options_group)
         
-        # Connect checkbox signals for conditional visibility
-        self.decrypt_checkbox.stateChanged.connect(self.update_ps3_checkboxes_visibility)
-        self.split_checkbox.stateChanged.connect(self.update_general_checkboxes_visibility)
+        # Connect signals for all checkboxes AFTER all are created
+        # Connect General group checkboxes
+        self.split_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_large_files', state))
+        self.keep_unsplit_dec_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_unsplit_file', state))
         
-        # Set initial visibility
-        self.update_general_checkboxes_visibility()
+        # Connect PS3 group checkboxes
+        self.decrypt_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('decrypt_iso', state))
+        self.extract_ps3_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('extract_ps3_iso', state))
+        self.keep_enc_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_encrypted_iso', state))
+        self.keep_dkey_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_dkey_file', state))
+        self.keep_decrypted_iso_checkbox.stateChanged.connect(lambda state: 
+            self.handle_checkbox_change('keep_decrypted_iso_after_extraction', state))
+    
+        # Connect PSN group checkbox
+        self.split_pkg_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_pkg', state))
+        
+        # Set initial visibility states for all checkboxes
+        self.update_all_checkbox_states()
         
         # Initially hide platform-specific options - they will be shown based on platform
         self.ps3_options_widget.setVisible(False)
         self.psn_options_widget.setVisible(False)
 
-    def update_ps3_checkboxes_visibility(self):
-        """Update visibility of PS3-specific checkboxes based on dependencies."""
-        # Keep encrypted ISO is only visible if decrypt is checked
-        self.keep_enc_checkbox.setVisible(self.decrypt_checkbox.isChecked())
+    def handle_checkbox_change(self, setting_name, state):
+        """Handle checkbox state changes in a centralized way."""
+        try:
+            # Convert Qt.CheckState to boolean
+            checked = (state == Qt.Checked)
+            
+            # Special case: if turning on extract_ps3_iso, check if we have extractps3iso binary
+            if setting_name == 'extract_ps3_iso' and checked:
+                if not os.path.isfile(self.settings_manager.extractps3iso_binary):
+                    # Need to check/download extractps3iso
+                    dialog = PrereqBinaryDialog("extractps3iso", self)
+                    if dialog.exec_():
+                        # User wants to download it
+                        if not self.settings_manager.download_extractps3iso():
+                            # Failed to download
+                            QMessageBox.warning(
+                                self, 
+                                "Download Failed", 
+                                "Failed to download extractps3iso. ISO extraction will not be available."
+                            )
+                            # Uncheck the checkbox since we can't use this feature
+                            self.extract_ps3_checkbox.blockSignals(True)
+                            self.extract_ps3_checkbox.setChecked(False)
+                            self.extract_ps3_checkbox.blockSignals(False)
+                            checked = False
+                    else:
+                        # User canceled download
+                        self.extract_ps3_checkbox.blockSignals(True)
+                        self.extract_ps3_checkbox.setChecked(False)
+                        self.extract_ps3_checkbox.blockSignals(False)
+                        checked = False
+            
+            # Save the setting
+            self.settings_manager.update_setting(setting_name, checked)
+            
+            # Update visibility and state of dependent checkboxes
+            self.update_all_checkbox_states()
+        except Exception as e:
+            print(f"Error handling checkbox change for {setting_name}: {str(e)}")
 
-    def update_general_checkboxes_visibility(self):
-        """Update visibility of general checkboxes based on dependencies."""
-        # Keep unsplit file is only visible if split is checked
-        self.keep_unsplit_dec_checkbox.setVisible(self.split_checkbox.isChecked())
+    def update_all_checkbox_states(self):
+        """Update visibility and state of all checkboxes based on dependencies."""
+        try:
+            # Get current states
+            decrypt_checked = self.decrypt_checkbox.isChecked()
+            extract_checked = self.extract_ps3_checkbox.isChecked()
+            split_checked = self.split_checkbox.isChecked()
+            
+            # ------ PS3 Specific Options ------
+            
+            # Rule 1: Everything except the dkey checkbox depends on decrypt being checked
+            self.keep_enc_checkbox.setVisible(decrypt_checked)
+            self.extract_ps3_checkbox.setVisible(decrypt_checked)
+            
+            # Rule 2: Keep decrypted ISO checkbox depends on both decrypt AND extract
+            self.keep_decrypted_iso_checkbox.setVisible(decrypt_checked and extract_checked)
+            
+            # Rule 3: If decrypt is unchecked, ensure extract is also unchecked
+            if not decrypt_checked and extract_checked:
+                self.extract_ps3_checkbox.blockSignals(True)
+                self.extract_ps3_checkbox.setChecked(False)
+                self.extract_ps3_checkbox.blockSignals(False)
+                # Update setting directly without triggering signals
+                self.settings_manager.update_setting('extract_ps3_iso', False)
+            
+            # ------ General Options ------
+            
+            # Split file related options
+            self.keep_unsplit_dec_checkbox.setVisible(split_checked)
+            
+        except Exception as e:
+            print(f"Error updating checkbox states: {str(e)}")
 
     def update_checkboxes_for_platform(self):
         """Update which checkboxes are visible based on the active platform tab."""
-        current_tab = self.result_list.currentIndex()
-        platform_ids = list(self.platforms.keys())
-        
-        # Default visibility settings
-        show_ps3dec = False
-        show_pkg_split = False
-        
-        # Get current platform ID
-        if 0 <= current_tab < len(platform_ids):
-            current_platform_id = platform_ids[current_tab]
+        try:
+            current_tab = self.result_list.currentIndex()
+            platform_ids = list(self.platforms.keys())
             
-            # Get checkbox settings for this platform
-            checkbox_settings = self.config_manager.get_platform_checkbox_settings(current_platform_id)
-            show_ps3dec = checkbox_settings['show_ps3dec']
-            show_pkg_split = checkbox_settings['show_pkg_split']
-        
-        # Update visibility of platform-specific options section
-        has_platform_specific_options = show_ps3dec or show_pkg_split
-        self.platform_options_group.setVisible(has_platform_specific_options)
-        
-        # Update visibility based on settings
-        self.ps3_options_widget.setVisible(show_ps3dec)
-        # PS3 checkbox visibility is handled in update_ps3_checkboxes_visibility
-        if show_ps3dec:
-            self.update_ps3_checkboxes_visibility()
-        self.psn_options_widget.setVisible(show_pkg_split)
-    
+            # Default visibility settings
+            show_ps3dec = False
+            show_pkg_split = False
+            
+            # Get current platform ID
+            if 0 <= current_tab < len(platform_ids):
+                current_platform_id = platform_ids[current_tab]
+                
+                # Get checkbox settings for this platform
+                checkbox_settings = self.config_manager.get_platform_checkbox_settings(current_platform_id)
+                show_ps3dec = checkbox_settings.get('show_ps3dec', False)
+                show_pkg_split = checkbox_settings.get('show_pkg_split', False)
+            
+            # Update visibility of platform-specific options section
+            has_platform_specific_options = show_ps3dec or show_pkg_split
+            self.platform_options_group.setVisible(has_platform_specific_options)
+            
+            # Update visibility based on settings
+            self.ps3_options_widget.setVisible(show_ps3dec)
+            self.psn_options_widget.setVisible(show_pkg_split)
+            
+            # After changing platform visibility, update specific checkbox states
+            self.update_all_checkbox_states()
+        except Exception as e:
+            print(f"Error updating checkboxes for platform: {str(e)}")
+
     def update_results(self):
         """Filter the software list based on the search text."""
         search_term = self.search_box.text().lower().split()
@@ -872,6 +1042,8 @@ class GUIDownloader(QWidget):
         self.keep_enc_checkbox.setEnabled(False)
         self.keep_unsplit_dec_checkbox.setEnabled(False)
         self.split_pkg_checkbox.setEnabled(False)
+        self.extract_ps3_checkbox.setEnabled(False)
+        self.keep_decrypted_iso_checkbox.setEnabled(False)  # Add this line
         
         # Change button to Pause
         self.start_pause_button.setText('Pause')
@@ -975,9 +1147,11 @@ class GUIDownloader(QWidget):
                 
                 # Change button back to Start
                 self.start_pause_button.setText('Start')
-            
-            # Save the updated queue
-            self.save_queue()
+                
+                # Clear download status labels
+                self.download_speed_label.setText("")
+                self.download_eta_label.setText("")
+                self.download_size_label.setText("")  # Clear size label
         
         finally:
             # If we're not paused, re-enable all buttons
@@ -1063,6 +1237,8 @@ class GUIDownloader(QWidget):
         self.keep_enc_checkbox.setEnabled(True)
         self.keep_unsplit_dec_checkbox.setEnabled(True)
         self.split_pkg_checkbox.setEnabled(True)
+        self.extract_ps3_checkbox.setEnabled(True)
+        self.keep_decrypted_iso_checkbox.setEnabled(True)  # Add this line
         self.start_pause_button.setEnabled(True)
         self.start_pause_button.setText('Start')
 
@@ -1109,11 +1285,13 @@ class GUIDownloader(QWidget):
             self.output_window.append(f"URL: {download_url}\n")  # Add explicit newline here
             
         self.progress_bar.reset()
+        self.download_size_label.setText("")  # Clear size label
         
         self.download_thread = DownloadThread(download_url, zip_file_path)
         self.download_thread.progress_signal.connect(self.progress_bar.setValue)
         self.download_thread.speed_signal.connect(self.download_speed_label.setText)
         self.download_thread.eta_signal.connect(self.download_eta_label.setText)
+        self.download_thread.size_signal.connect(self.download_size_label.setText)  # Connect size signal
         self.download_thread.download_paused_signal.connect(self.on_download_paused)
         
         # Create an event loop and wait for download to complete
@@ -1305,9 +1483,26 @@ class GUIDownloader(QWidget):
                     with zipfile.ZipFile(dkey_zip, 'r') as zip_ref:
                         zip_ref.extractall(self.settings_manager.processing_dir)
                     os.remove(dkey_zip)
-            
+        
             # Decrypt ISO if needed
             if self.decrypt_checkbox.isChecked():
+                # Check if PS3Dec binary exists
+                if not os.path.isfile(self.settings_manager.ps3dec_binary):
+                    # Need to check/download PS3Dec
+                    dialog = PrereqBinaryDialog("ps3dec", self)
+                    if dialog.exec_():
+                        # User wants to download it
+                        if not self.settings_manager.download_ps3dec():
+                            # Failed to download
+                            self.output_window.append(f"({queue_position}) Failed to download PS3Dec. ISO decryption will not be available.")
+                            # Skip decryption
+                            return
+                    else:
+                        # User canceled download
+                        self.output_window.append(f"({queue_position}) PS3Dec is required for decryption but was not downloaded.")
+                        # Skip decryption
+                        return
+                
                 iso_path = os.path.join(self.settings_manager.processing_dir, f"{base_name}.iso")
                 if os.path.isfile(os.path.join(self.settings_manager.processing_dir, f"{base_name}.dkey")):
                     # Update queue status to show DECRYPTING
@@ -1319,33 +1514,152 @@ class GUIDownloader(QWidget):
                     self.output_window.append(f"({queue_position}) Decrypting ISO for {base_name}...")
                     enc_path = self.processor.decrypt_iso(iso_path, key)
                     
+                    # Extract ISO if option is checked - ONLY AFTER DECRYPTION IS COMPLETE
+                    if self.extract_ps3_checkbox.isChecked() and os.path.exists(iso_path):
+                        # Check if extractps3iso binary exists
+                        if not os.path.isfile(self.settings_manager.extractps3iso_binary):
+                            # Need to check/download extractps3iso
+                            dialog = PrereqBinaryDialog("extractps3iso", self)
+                            if dialog.exec_():
+                                # User wants to download it
+                                if not self.settings_manager.download_extractps3iso():
+                                    # Failed to download
+                                    self.output_window.append(f"({queue_position}) Failed to download extractps3iso. ISO extraction will not be available.")
+                                    # Skip extraction
+                                    return
+                            else:
+                                # User canceled download
+                                self.output_window.append(f"({queue_position}) extractps3iso is required for extraction but was not downloaded.")
+                                # Skip extraction
+                                return
+                        
+                        # Update queue status to show EXTRACTING
+                        self.update_queue_status(self.current_item, "EXTRACTING", QColor(0, 170, 0))  # Green color
+                        self.output_window.append(f"({queue_position}) Extracting ISO contents for {base_name}...")
+                        
+                        # Call the extract_iso method on the DECRYPTED iso
+                        success, extract_dir = self.processor.extract_iso(iso_path)
+                        if success:
+                            # Move the extracted directory to PS3ISO directory instead of keeping it in processing dir
+                            # Get target path in PS3ISO directory
+                            target_dir = os.path.join(self.settings_manager.ps3iso_dir, os.path.basename(extract_dir))
+                            
+                            # Check if target directory already exists
+                            if os.path.exists(target_dir):
+                                # If it exists, remove it first to avoid merge issues
+                                try:
+                                    shutil.rmtree(target_dir)
+                                except Exception as e:
+                                    self.output_window.append(f"({queue_position}) Warning: Could not remove existing directory: {e}")
+                            
+                            # Move the extracted folder to PS3ISO directory
+                            try:
+                                shutil.move(extract_dir, self.settings_manager.ps3iso_dir)
+                                self.output_window.append(f"({queue_position}) ISO contents moved to {target_dir}")
+                            except Exception as e:
+                                self.output_window.append(f"({queue_position}) Error moving extracted directory: {e}")
+                                
+                            # Handle the decrypted ISO based on user setting
+                            if not self.settings_manager.keep_decrypted_iso_after_extraction:
+                                try:
+                                    os.remove(iso_path)
+                                    self.output_window.append(f"({queue_position}) Deleted decrypted ISO after extraction")
+                                except Exception as e:
+                                    self.output_window.append(f"({queue_position}) Warning: Could not delete decrypted ISO: {e}")
+                            else:
+                                # Move the ISO to PS3ISO directory as well if we're keeping it
+                                ps3iso_iso_path = os.path.join(self.settings_manager.ps3iso_dir, os.path.basename(iso_path))
+                                if os.path.exists(ps3iso_iso_path):
+                                    try:
+                                        os.remove(ps3iso_iso_path)  # Remove existing file
+                                    except Exception as e:
+                                        self.output_window.append(f"({queue_position}) Warning: Could not remove existing ISO: {e}")
+                                    
+                                try:
+                                    shutil.move(iso_path, self.settings_manager.ps3iso_dir)
+                                    self.output_window.append(f"({queue_position}) Moved ISO file to PS3ISO directory")
+                                except Exception as e:
+                                    self.output_window.append(f"({queue_position}) Error moving ISO file: {e}")
+                        else:
+                            self.output_window.append(f"({queue_position}) Failed to extract ISO contents")
+                            
+                            # If extraction failed, still move the ISO to PS3ISO
+                            ps3iso_iso_path = os.path.join(self.settings_manager.ps3iso_dir, os.path.basename(iso_path))
+                            if os.path.exists(ps3iso_iso_path):
+                                try:
+                                    os.remove(ps3iso_iso_path)  # Remove existing file
+                                except Exception as e:
+                                    self.output_window.append(f"({queue_position}) Warning: Could not remove existing ISO: {e}")
+                                    
+                            try:
+                                shutil.move(iso_path, self.settings_manager.ps3iso_dir)
+                                self.output_window.append(f"({queue_position}) Moved ISO file to PS3ISO directory")
+                            except Exception as e:
+                                self.output_window.append(f"({queue_position}) Error moving ISO file: {e}")
+                    else:
+                        # If not extracting, move the ISO to PS3ISO
+                        ps3iso_iso_path = os.path.join(self.settings_manager.ps3iso_dir, os.path.basename(iso_path))
+                        if os.path.exists(ps3iso_iso_path):
+                            try:
+                                os.remove(ps3iso_iso_path)  # Remove existing file
+                            except Exception as e:
+                                self.output_window.append(f"({queue_position}) Warning: Could not remove existing ISO: {e}")
+                                
+                        try:
+                            shutil.move(iso_path, self.settings_manager.ps3iso_dir)
+                            self.output_window.append(f"({queue_position}) Moved ISO file to PS3ISO directory")
+                        except Exception as e:
+                            self.output_window.append(f"({queue_position}) Error moving ISO file: {e}")
+                    
                     # Delete encrypted ISO if not keeping it
-                    if not self.keep_enc_checkbox.isChecked():
-                        os.remove(enc_path)
-            
-            # Split ISO if needed
-            if self.split_checkbox.isChecked():
+                    if not self.keep_enc_checkbox.isChecked() and os.path.exists(enc_path):
+                        try:
+                            os.remove(enc_path)
+                        except Exception as e:
+                            self.output_window.append(f"({queue_position}) Warning: Could not delete encrypted ISO: {e}")
+            else:
+                # If not decrypting, move the ISO to PS3ISO
                 iso_path = os.path.join(self.settings_manager.processing_dir, f"{base_name}.iso")
-                if os.path.exists(iso_path) and os.path.getsize(iso_path) >= 4294967295:
-                    # Update queue status to show SPLITTING
-                    self.update_queue_status(self.current_item, "SPLITTING", QColor(0, 170, 0))  # Green color
-                    
-                    self.output_window.append(f"({queue_position}) Splitting ISO for {base_name}...")
-                    split_success = self.processor.split_iso(iso_path)
-                    
-                    # Delete unsplit ISO if not keeping
-                    if split_success and not self.keep_unsplit_dec_checkbox.isChecked():
-                        os.remove(iso_path)
+                if os.path.exists(iso_path):
+                    ps3iso_iso_path = os.path.join(self.settings_manager.ps3iso_dir, os.path.basename(iso_path))
+                    if os.path.exists(ps3iso_iso_path):
+                        try:
+                            os.remove(ps3iso_iso_path)  # Remove existing file
+                        except Exception as e:
+                            self.output_window.append(f"({queue_position}) Warning: Could not remove existing ISO: {e}")
+                        
+                    try:
+                        shutil.move(iso_path, self.settings_manager.ps3iso_dir)
+                        self.output_window.append(f"({queue_position}) Moved ISO file to PS3ISO directory")
+                    except Exception as e:
+                        self.output_window.append(f"({queue_position}) Error moving ISO file: {e}")
             
-            # Delete dkey file if not keeping
+            # Delete dkey file if not keeping it (regardless of whether decryption was performed)
             if not self.keep_dkey_checkbox.isChecked():
                 dkey_path = os.path.join(self.settings_manager.processing_dir, f"{base_name}.dkey")
-                if os.path.isfile(dkey_path):
-                    os.remove(dkey_path)
-            
-            # Move files to output directory
-            self.processor.move_processed_files(base_name, self.settings_manager.processing_dir, self.settings_manager.ps3iso_dir)
-            
+                if os.path.exists(dkey_path):
+                    try:
+                        os.remove(dkey_path)
+                    except Exception as e:
+                        self.output_window.append(f"({queue_position}) Warning: Could not delete dkey file: {e}")
+                        
+            # Move dkey file to PS3ISO if keeping it
+            elif self.keep_dkey_checkbox.isChecked():
+                dkey_path = os.path.join(self.settings_manager.processing_dir, f"{base_name}.dkey")
+                if os.path.exists(dkey_path):
+                    ps3iso_dkey_path = os.path.join(self.settings_manager.ps3iso_dir, os.path.basename(dkey_path))
+                    if os.path.exists(ps3iso_dkey_path):
+                        try:
+                            os.remove(ps3iso_dkey_path)  # Remove existing file
+                        except Exception as e:
+                            self.output_window.append(f"({queue_position}) Warning: Could not remove existing dkey file: {e}")
+                            
+                    try:
+                        shutil.move(dkey_path, self.settings_manager.ps3iso_dir)
+                        self.output_window.append(f"({queue_position}) Moved dkey file to PS3ISO directory")
+                    except Exception as e:
+                        self.output_window.append(f"({queue_position}) Error moving dkey file: {e}")
+        
         except Exception as e:
             self.output_window.append(f"ERROR: Processing failed for {base_name}: {str(e)}")
         finally:
@@ -1592,7 +1906,7 @@ class GUIDownloader(QWidget):
         # Check if paused after unzip
         if self.is_paused:
             return
-        
+            
         # Delete the zip file if it exists
         if os.path.exists(file_path):
             try:
@@ -1657,8 +1971,6 @@ class GUIDownloader(QWidget):
                 
             # Set the display text (without HTML)
             list_item.setText(clean_text)
-            
-            # No bold font by default - only the current download gets bold
         else:
             # No platform prefix found, just use text as is
             list_item.setText(item_text)
@@ -1666,20 +1978,6 @@ class GUIDownloader(QWidget):
         self.queue_list.addItem(list_item)
         return list_item
 
-    def format_queue_item(self, item_text):
-        """Apply formatting to a queue item text."""
-        # No need to use HTML anymore, just return the plain text
-        # This is used in several places like the start_download method
-        # Strip any existing HTML to be safe
-        if '<' in item_text and '>' in item_text:
-            item_text = re.sub(r'<[^>]+>', '', item_text)
-        
-        # Format the item text with the current queue position
-        if self.current_position:
-            return f"{item_text} ({self.current_position})"
-        else:
-            return item_text
-    
     def format_file_size(self, size_bytes):
         """Format file size for display."""
         if size_bytes < 1024:
@@ -1699,16 +1997,16 @@ class GUIDownloader(QWidget):
                 # Extract original text without any status
                 text = item.data(Qt.UserRole)
                 clean_text = re.sub(r' \([A-Z]+\)$', '', text)
-                clean_text = re.sub(r' \([A-Z]+\)$', '', text)
+                
                 # Add the new status
                 new_text = f"{clean_text} ({status})"
                 item.setText(new_text)
-
+                
                 # Apply bold font
                 font = QFont()
                 font.setBold(True)
                 item.setFont(font)
-
+                
                 # Apply color if specified
                 if color:
                     item.setForeground(QBrush(color))
