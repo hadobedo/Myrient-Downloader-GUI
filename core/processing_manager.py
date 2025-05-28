@@ -662,60 +662,164 @@ class ProcessingManager(QObject):
             else:
                 self._move_file_to_directory(file_in_processing, final_target_dir, queue_position)
     
+    def _merge_directories(self, source_dir, target_dir, queue_position):
+        """
+        Recursively merges contents of source_dir into target_dir.
+        - Preserves existing files and folders in target_dir unless there's a name conflict.
+        - Overwrites conflicting files in target_dir with files from source_dir.
+        - Recursively merges subdirectories.
+        Returns True if merge is successful, False otherwise.
+        """
+        self.output_window.append(f"({queue_position}) Merging '{os.path.basename(source_dir)}' from '{os.path.dirname(source_dir)}' into '{target_dir}'")
+
+        if not os.path.exists(source_dir) or not os.path.isdir(source_dir):
+            self.output_window.append(f"({queue_position}) Source '{source_dir}' is not a valid directory. Merge aborted.")
+            return False
+
+        if not os.path.exists(target_dir):
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+                self.output_window.append(f"({queue_position}) Created target directory for merge: {target_dir}")
+            except Exception as e_mkdir:
+                self.output_window.append(f"({queue_position}) Error creating target directory {target_dir} for merge: {e_mkdir}. Merge aborted.")
+                return False
+        elif not os.path.isdir(target_dir):
+            self.output_window.append(f"({queue_position}) Target '{target_dir}' exists but is not a directory. Merge aborted.")
+            return False
+
+        overall_success = True
+        for item_name in os.listdir(source_dir):
+            source_item_path = os.path.join(source_dir, item_name)
+            target_item_path = os.path.join(target_dir, item_name)
+
+            try:
+                if os.path.isdir(source_item_path):
+                    self.output_window.append(f"({queue_position}) Processing subdirectory for merge: '{item_name}'")
+                    if not self._merge_directories(source_item_path, target_item_path, queue_position): # Recursive call
+                        overall_success = False
+                elif os.path.isfile(source_item_path):
+                    if os.path.exists(target_item_path):
+                        if os.path.isdir(target_item_path):
+                            self.output_window.append(f"({queue_position}) Conflict: Cannot overwrite directory '{target_item_path}' with file '{source_item_path}'. Skipping.")
+                            overall_success = False
+                            continue
+                        else: # Target is a file, overwrite
+                            self.output_window.append(f"({queue_position}) Overwriting file: '{target_item_path}' with content from '{source_item_path}'")
+                            os.remove(target_item_path)
+                    else:
+                        self.output_window.append(f"({queue_position}) Moving new file: '{item_name}' to '{target_dir}'")
+
+                    shutil.move(source_item_path, target_item_path)
+            except Exception as e_item_merge:
+                self.output_window.append(f"({queue_position}) Error merging item '{item_name}': {e_item_merge}")
+                overall_success = False
+
+        if overall_success:
+            self.output_window.append(f"({queue_position}) Merge operation for '{source_dir}' into '{target_dir}' completed successfully.")
+        else:
+             self.output_window.append(f"({queue_position}) Merge operation for '{source_dir}' into '{target_dir}' completed with one or more errors.")
+        return overall_success
+
     def _move_content_to_game_folder(self, source_path, target_dir, queue_position, is_directory=False):
-        """Move content to the target directory, handling both files and directories."""
+        """Move content to the target directory, attempting to merge if it's a directory."""
         try:
             source_name = os.path.basename(source_path)
             target_path = os.path.join(target_dir, source_name)
-            
-            # Ensure target directory exists
+
             os.makedirs(target_dir, exist_ok=True)
-            
-            # Remove existing target if it exists
-            if os.path.exists(target_path):
-                if os.path.isdir(target_path):
-                    self.output_window.append(f"({queue_position}) Target directory {target_path} already exists. Removing before move.")
+
+            if is_directory and os.path.isdir(source_path) and os.path.isdir(target_path):
+                self.output_window.append(f"({queue_position}) Target directory '{target_path}' exists. Attempting to merge.")
+                if self._merge_directories(source_path, target_path, queue_position):
+                    self.output_window.append(f"({queue_position}) Successfully merged '{source_name}' into '{target_dir}'.")
+                    # Source directory might be empty after merge, attempt to remove
+                    try:
+                        if not os.listdir(source_path): # Check if empty
+                             os.rmdir(source_path)
+                    except OSError: # Fails if not empty or other issues, which is fine.
+                        pass
+                    return # Merge successful
+                else:
+                    self.output_window.append(f"({queue_position}) Merge failed for '{source_name}'. Falling back to replace.")
+                    # Fallback: remove existing target and move
                     try:
                         shutil.rmtree(target_path)
                     except Exception as e_rm:
-                        self.output_window.append(f"({queue_position}) Failed to remove existing target directory {target_path}: {e_rm}. Move may fail.")
-                else:
-                    self.output_window.append(f"({queue_position}) Target file {target_path} already exists. Removing before move.")
-                    try:
+                        self.output_window.append(f"({queue_position}) Failed to remove existing target directory {target_path} for fallback: {e_rm}. Move may fail.")
+            elif os.path.exists(target_path): # Target exists but not suitable for merge (e.g., file or source is file)
+                self.output_window.append(f"({queue_position}) Target '{target_path}' exists. Removing before move.")
+                try:
+                    if os.path.isdir(target_path):
+                        shutil.rmtree(target_path)
+                    else:
                         os.remove(target_path)
-                    except Exception as e_rm:
-                        self.output_window.append(f"({queue_position}) Failed to remove existing target file {target_path}: {e_rm}. Move may fail.")
-            
-            # Move the content
+                except Exception as e_rm:
+                    self.output_window.append(f"({queue_position}) Failed to remove existing target {target_path}: {e_rm}. Move may fail.")
+
+            # Proceed with move if not merged or if it was a file
             if os.path.exists(source_path):
                 try:
                     shutil.move(source_path, target_path)
                     content_type = "directory" if is_directory else "file"
-                    self.output_window.append(f"({queue_position}) Moved {content_type} '{source_name}' to game folder")
+                    self.output_window.append(f"({queue_position}) Moved {content_type} '{source_name}' to game folder: {target_path}")
                 except Exception as e_mv:
                     self.output_window.append(f"({queue_position}) Error moving {source_path} to {target_path}: {e_mv}")
-            
+            else:
+                # This case can happen if merge moved all content and source_path (directory) was removed
+                if not (is_directory and os.path.isdir(target_path)): # if it wasn't a successful directory merge
+                    self.output_window.append(f"({queue_position}) Source path {source_path} does not exist. Move skipped (possibly already merged).")
+
+
         except Exception as e:
-            self.output_window.append(f"({queue_position}) Error in _move_content_to_game_folder: {e}")
+            self.output_window.append(f"({queue_position}) Error in _move_content_to_game_folder for '{source_path}': {e}")
 
     def _move_directory_structure(self, source_dir, target_dir, queue_position):
-        """Move a directory structure using traditional method (preserve structure)."""
+        """Move a directory structure, attempting to merge if the target exists."""
         try:
             target_path = os.path.join(target_dir, os.path.basename(source_dir))
-            if os.path.exists(target_path):
-                self.output_window.append(f"({queue_position}) Target directory {target_path} already exists. Removing before move.")
-                try:
-                    shutil.rmtree(target_path)
-                except Exception as e_rm:
-                    self.output_window.append(f"({queue_position}) Failed to remove existing target directory {target_path}: {e_rm}. Move may fail.")
+
+            if os.path.isdir(source_dir) and os.path.isdir(target_path):
+                self.output_window.append(f"({queue_position}) Target directory '{target_path}' exists. Attempting to merge.")
+                if self._merge_directories(source_dir, target_path, queue_position):
+                    self.output_window.append(f"({queue_position}) Successfully merged directory '{os.path.basename(source_dir)}' into '{target_dir}'.")
+                    # Source directory might be empty after merge, attempt to remove
+                    try:
+                        if not os.listdir(source_dir): # Check if empty
+                            os.rmdir(source_dir)
+                    except OSError: # Fails if not empty or other issues, which is fine.
+                        pass
+                    return # Merge successful
+                else:
+                    self.output_window.append(f"({queue_position}) Merge failed for '{os.path.basename(source_dir)}'. Falling back to replace.")
+                    # Fallback: remove existing target and move
+                    try:
+                        shutil.rmtree(target_path)
+                    except Exception as e_rm:
+                        self.output_window.append(f"({queue_position}) Failed to remove existing target directory {target_path} for fallback: {e_rm}. Move may fail.")
+            elif os.path.exists(target_path): # Target exists but not suitable for merge (e.g. it's a file)
+                 self.output_window.append(f"({queue_position}) Target '{target_path}' exists and is not a directory or source is not a directory. Removing before move.")
+                 try:
+                    if os.path.isdir(target_path):
+                        shutil.rmtree(target_path)
+                    else:
+                        os.remove(target_path)
+                 except Exception as e_rm:
+                    self.output_window.append(f"({queue_position}) Failed to remove existing target {target_path}: {e_rm}. Move may fail.")
             
-            try:
-                shutil.move(source_dir, target_path)
-                self.output_window.append(f"({queue_position}) Moved directory structure {os.path.basename(source_dir)} to {target_dir}")
-            except Exception as e_mv:
-                self.output_window.append(f"({queue_position}) Error moving directory {source_dir} to {target_path}: {e_mv}")
+            # Proceed with move if not merged or if target didn't exist
+            if os.path.exists(source_dir):
+                try:
+                    shutil.move(source_dir, target_path)
+                    self.output_window.append(f"({queue_position}) Moved directory structure '{os.path.basename(source_dir)}' to '{target_dir}'")
+                except Exception as e_mv:
+                    self.output_window.append(f"({queue_position}) Error moving directory {source_dir} to {target_path}: {e_mv}")
+            else:
+                # This case can happen if merge moved all content and source_dir was removed
+                if not os.path.isdir(target_path): # if it wasn't a successful directory merge
+                    self.output_window.append(f"({queue_position}) Source directory {source_dir} does not exist. Move skipped (possibly already merged).")
+
         except Exception as e:
-            self.output_window.append(f"({queue_position}) Error in _move_directory_structure: {e}")
+            self.output_window.append(f"({queue_position}) Error in _move_directory_structure for '{source_dir}': {e}")
 
     def _move_individual_file(self, source_file, target_dir, queue_position, settings, organize_content):
         """Move an individual file, handling splitting if needed."""
