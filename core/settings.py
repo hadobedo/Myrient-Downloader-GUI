@@ -8,7 +8,7 @@ from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QGroupBox, QFormLayout,
-    QMessageBox, QScrollArea, QWidget, QTabWidget, QDialogButtonBox
+    QMessageBox, QScrollArea, QWidget, QTabWidget, QDialogButtonBox, QCheckBox
 )
 class UnifiedBinaryDetectionDialog(QDialog):
     """Simple unified dialog to detect and manage PS3 tools."""
@@ -18,10 +18,11 @@ class UnifiedBinaryDetectionDialog(QDialog):
         self.missing_binaries = missing_binaries  # List of missing binary names
         self.results = {}  # Store user choices for each binary
         self.is_windows = platform.system() == 'Windows'
+        self.do_not_remind = False  # Store checkbox state
         
         self.setWindowTitle("Configure PS3 Tools")
         self.setMinimumWidth(600)
-        self.setFixedHeight(150 + (len(missing_binaries) * 40))
+        self.setFixedHeight(180 + (len(missing_binaries) * 40))  # Increased height for checkbox
         
         self.initUI()
     
@@ -41,6 +42,11 @@ class UnifiedBinaryDetectionDialog(QDialog):
         for binary in self.missing_binaries:
             binary_layout = self._create_binary_row(binary)
             layout.addLayout(binary_layout)
+        
+        # Add "Do not remind me" checkbox
+        self.do_not_remind_checkbox = QCheckBox("Do not remind me about missing binaries")
+        self.do_not_remind_checkbox.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
+        layout.addWidget(self.do_not_remind_checkbox)
         
         # Button layout
         button_layout = QHBoxLayout()
@@ -160,9 +166,12 @@ class UnifiedBinaryDetectionDialog(QDialog):
             'source': source,
             'configured': True
         }
-    
     def accept(self):
         """Handle OK button - process any manually entered paths."""
+        # Save the "do not remind me" setting
+        self.do_not_remind = self.do_not_remind_checkbox.isChecked()
+        self._save_do_not_remind_setting()
+        
         # Check for manually entered paths
         for binary, input_widget in self.binary_inputs.items():
             path = input_widget.text().strip()
@@ -180,6 +189,10 @@ class UnifiedBinaryDetectionDialog(QDialog):
     
     def _skip_setup(self):
         """Skip the binary setup."""
+        # Save the "do not remind me" setting
+        self.do_not_remind = self.do_not_remind_checkbox.isChecked()
+        self._save_do_not_remind_setting()
+        
         for binary in self.missing_binaries:
             self.results[binary] = {
                 'path': '',
@@ -187,6 +200,23 @@ class UnifiedBinaryDetectionDialog(QDialog):
                 'configured': False
             }
         self.accept()
+    
+    def _save_do_not_remind_setting(self):
+        """Save the 'do not remind me' setting to the INI file."""
+        try:
+            # Get settings manager
+            settings_manager = None
+            if hasattr(self.parent(), 'settings_manager'):
+                settings_manager = self.parent().settings_manager
+            else:
+                from core.settings import SettingsManager
+                settings_manager = SettingsManager()
+            
+            # Save the setting
+            settings_manager.settings.setValue('notifications/do_not_remind_missing_binaries', self.do_not_remind)
+            settings_manager.settings.sync()
+        except Exception as e:
+            print(f"Warning: Could not save 'do not remind me' setting: {str(e)}")
     
     def _show_error(self, title, message):
         """Show an error message."""
@@ -272,6 +302,15 @@ class BinaryValidationManager:
         
         # If no missing binaries, continue normally
         if not missing_binaries:
+            return True
+        
+        # Check if user has chosen not to be reminded about missing binaries
+        do_not_remind = self.settings_manager.settings.value('notifications/do_not_remind_missing_binaries', False)
+        if isinstance(do_not_remind, str):
+            do_not_remind = do_not_remind.lower() in ('true', 'yes', '1', 'on')
+        
+        if do_not_remind:
+            # User doesn't want to be reminded, skip the dialog
             return True
         
         # Show unified binary detection dialog
@@ -1142,7 +1181,7 @@ class SettingsDialog(QDialog):
         scroll_layout.addWidget(root_group)
         
         # PlayStation Console Directories Section
-        playstation_group = QGroupBox("PlayStation Console Directories")
+        playstation_group = QGroupBox("PlayStation Directories")
         playstation_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
         playstation_layout = QFormLayout()
         
@@ -1201,7 +1240,7 @@ class SettingsDialog(QDialog):
                              if k not in ['ps3', 'ps2', 'psx', 'psp', 'psn']}
             
             if other_platforms:
-                other_group = QGroupBox("Other Systems")
+                other_group = QGroupBox("Other Consoles/Systems")
                 other_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
                 other_layout = QFormLayout()
                 
@@ -1309,13 +1348,16 @@ class SettingsDialog(QDialog):
         theme_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
         theme_layout = QFormLayout()
         
-        # Get current theme setting
+        # Get current theme setting - avoid creating QSettings if QApplication doesn't exist
+        current_theme = 'dark'  # Default to dark theme
         try:
-            from PyQt5.QtCore import QSettings
-            app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
-            current_theme = app_settings.value('appearance/theme', 'auto')
+            from PyQt5.QtWidgets import QApplication
+            if QApplication.instance():  # Only access QSettings if QApplication exists
+                from PyQt5.QtCore import QSettings
+                app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
+                current_theme = app_settings.value('appearance/theme', 'dark')
         except Exception:
-            current_theme = 'auto'
+            current_theme = 'dark'
         
         # Theme selection
         from PyQt5.QtWidgets import QComboBox
@@ -1495,10 +1537,10 @@ class SettingsDialog(QDialog):
             self.ps3dec_input.setText('')
             self.extractps3iso_input.setText('')
             
-            # Reset theme to auto
+            # Reset theme to dark
             if hasattr(self, 'theme_combo'):
                 for i in range(self.theme_combo.count()):
-                    if self.theme_combo.itemData(i) == 'auto':
+                    if self.theme_combo.itemData(i) == 'dark':
                         self.theme_combo.setCurrentIndex(i)
                         break
             

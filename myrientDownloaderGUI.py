@@ -73,8 +73,8 @@ def apply_theme(app):
     global app_settings
     app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
     
-    # Get user preference: 'auto', 'light', 'dark', 'system'
-    theme_preference = app_settings.value('appearance/theme', 'auto')
+    # Get user preference: 'auto', 'light', 'dark', 'system' - default to 'dark'
+    theme_preference = app_settings.value('appearance/theme', 'dark')
     
     if theme_preference == 'dark':
         use_dark = True
@@ -139,14 +139,14 @@ def is_dark_mode():
     """Check if dark mode is currently active (for backward compatibility)."""
     global app_settings
     if app_settings:
-        theme_preference = app_settings.value('appearance/theme', 'auto')
+        theme_preference = app_settings.value('appearance/theme', 'dark')
         if theme_preference == 'dark':
             return True
         elif theme_preference == 'light':
             return False
         elif theme_preference == 'auto':
             return detect_system_dark_mode()
-    return False
+    return True  # Default to dark mode
 
 def style_dialog_for_theme(dialog):
     """Apply minimal theme styling to dialogs."""
