@@ -12,8 +12,7 @@ from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop
 from PyQt5.QtGui import QFont, QBrush, QColor
 
 from gui.output_window import OutputWindow
-from gui.check_prereq_binaries_dialog import PrereqBinaryDialog
-from core.settings import SettingsManager, SettingsDialog
+from core.settings import SettingsManager, SettingsDialog, BinaryValidationDialog
 from core.config_manager import ConfigManager
 from threads.download_threads import GetSoftwareListThread
 
@@ -313,7 +312,7 @@ class GUIDownloader(QWidget):
         
         # Add universal content organization option
         row += 1
-        self.organize_content_checkbox = QCheckBox('Organize content into game folders', self)
+        self.organize_content_checkbox = QCheckBox('Group downloaded files per game', self)
         self.organize_content_checkbox.setChecked(self.settings_manager.organize_content_to_folders)
         general_grid.addWidget(self.organize_content_checkbox, row, 0, 1, 2)  # Span 2 columns
         
@@ -349,7 +348,7 @@ class GUIDownloader(QWidget):
         
         # Second row - Extract ISO contents checkbox
         row += 1
-        self.extract_ps3_checkbox = QCheckBox('Extract ISO contents', self)
+        self.extract_ps3_checkbox = QCheckBox('Extract ISO using extractps3iso', self)
         self.extract_ps3_checkbox.setChecked(self.settings_manager.extract_ps3_iso)
         ps3_grid.addWidget(self.extract_ps3_checkbox, row, 0, 1, 2)  # Span 2 columns
         
@@ -425,14 +424,14 @@ class GUIDownloader(QWidget):
             if setting_name == 'extract_ps3_iso' and checked:
                 if not os.path.isfile(self.settings_manager.extractps3iso_binary):
                     # Need to check/download extractps3iso
-                    dialog = PrereqBinaryDialog("extractps3iso", self)
+                    dialog = BinaryValidationDialog("extractps3iso", self)
                     if dialog.exec_():
                         # User wants to download it
                         if not self.settings_manager.download_extractps3iso():
                             # Failed to download
                             QMessageBox.warning(
-                                self, 
-                                "Download Failed", 
+                                self,
+                                "Download Failed",
                                 "Failed to download extractps3iso. ISO extraction will not be available."
                             )
                             # Uncheck the checkbox since we can't use this feature
@@ -568,9 +567,6 @@ class GUIDownloader(QWidget):
         
         removed_count = self.app_controller.remove_from_queue(selected_items, self.queue_list)
         
-        if removed_count > 0:
-            self.output_window.append(f"Removed {removed_count} items from queue")
-        
         # Update button state
         self.update_remove_from_queue_button()
     
@@ -578,9 +574,10 @@ class GUIDownloader(QWidget):
         """Open the settings dialog."""
         dlg = SettingsDialog(self.settings_manager, self.config_manager, self)
         if dlg.exec_() == QDialog.Accepted:
-            QMessageBox.information(self, "Settings", "Settings updated successfully.")
+            QMessageBox.information(self, "Settings", "Settings saved.")
             # Optionally, update directories on disk if changed
             self.settings_manager.create_directories()
+    
     
 
     def closeEvent(self, event):

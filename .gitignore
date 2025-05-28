@@ -18,7 +18,8 @@ dist/
 *.spec
 
 # ignore binaries
-ps3dec.exe
+ps3dec*
+extractps3iso*
 splitps3iso*
 
 # ignore game files

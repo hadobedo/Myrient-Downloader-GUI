@@ -8,21 +8,361 @@ from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QGroupBox, QFormLayout,
-    QMessageBox, QScrollArea, QWidget, QTabWidget
+    QMessageBox, QScrollArea, QWidget, QTabWidget, QDialogButtonBox
 )
+class UnifiedBinaryDetectionDialog(QDialog):
+    """Simple unified dialog to detect and manage PS3 tools."""
+    
+    def __init__(self, missing_binaries, parent=None):
+        super().__init__(parent)
+        self.missing_binaries = missing_binaries  # List of missing binary names
+        self.results = {}  # Store user choices for each binary
+        self.is_windows = platform.system() == 'Windows'
+        
+        self.setWindowTitle("Configure PS3 Tools")
+        self.setMinimumWidth(600)
+        self.setFixedHeight(150 + (len(missing_binaries) * 40))
+        
+        self.initUI()
+    
+    def initUI(self):
+        """Initialize the simple unified binary detection UI."""
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+        
+        # Simple explanation
+        explanation = QLabel("Please configure the required PS3 tools binaries:")
+        explanation.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(explanation)
+        
+        # Binary configuration rows
+        self.binary_inputs = {}
+        
+        for binary in self.missing_binaries:
+            binary_layout = self._create_binary_row(binary)
+            layout.addLayout(binary_layout)
+        
+        # Button layout
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        # Skip button
+        skip_btn = QPushButton("Skip")
+        skip_btn.clicked.connect(self._skip_setup)
+        button_layout.addWidget(skip_btn)
+        
+        # OK button
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setDefault(True)
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+    
+    def _create_binary_row(self, binary):
+        """Create a simple row for a specific binary."""
+        layout = QHBoxLayout()
+        
+        # Binary label
+        if binary == "ps3dec":
+            label_text = "PS3Dec binary:"
+        elif binary == "extractps3iso":
+            label_text = "extractps3iso binary:"
+        else:
+            label_text = f"{binary} binary:"
+        
+        label = QLabel(label_text)
+        label.setMinimumWidth(150)
+        layout.addWidget(label)
+        
+        # Path input box
+        path_input = QLineEdit()
+        path_input.setPlaceholderText("Path to binary...")
+        layout.addWidget(path_input)
+        self.binary_inputs[binary] = path_input
+        
+        # Browse button
+        browse_btn = QPushButton("Browse")
+        browse_btn.setFixedWidth(70)
+        browse_btn.clicked.connect(lambda: self._browse_binary(binary))
+        layout.addWidget(browse_btn)
+        
+        # Download button (Windows only)
+        if self.is_windows:
+            download_btn = QPushButton("Download")
+            download_btn.setFixedWidth(70)
+            download_btn.clicked.connect(lambda: self._download_binary(binary))
+            layout.addWidget(download_btn)
+        
+        return layout
+    
+    def _browse_binary(self, binary):
+        """Browse for a specific binary."""
+        title = f"Select {binary} executable"
+        file_filter = "All Files (*)" if os.name == 'posix' else "Executables (*.exe);;All Files (*)"
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, title, os.path.expanduser("~"), file_filter
+        )
+        
+        if file_path and os.path.isfile(file_path):
+            # Update the input field
+            self.binary_inputs[binary].setText(file_path)
+            self._configure_binary(binary, file_path, "manually located")
+    
+    def _download_binary(self, binary):
+        """Download a specific binary."""
+        if not self.is_windows:
+            return
+        
+        # Get settings manager
+        settings_manager = None
+        if hasattr(self.parent(), 'settings_manager'):
+            settings_manager = self.parent().settings_manager
+        else:
+            from core.settings import SettingsManager
+            settings_manager = SettingsManager()
+        
+        success = False
+        if binary == "ps3dec":
+            success = settings_manager.download_ps3dec()
+        elif binary == "extractps3iso":
+            success = settings_manager.download_extractps3iso()
+        
+        if success:
+            # Get the path that was set by the download
+            binary_path = getattr(settings_manager, f"{binary}_binary", "")
+            self.binary_inputs[binary].setText(binary_path)
+            self._configure_binary(binary, binary_path, "downloaded")
+        else:
+            self._show_error(f"Failed to download {binary}",
+                           "Please check your internet connection and try again.")
+    
+    def _configure_binary(self, binary, path, source):
+        """Configure a binary with the given path."""
+        if not path or not os.path.isfile(path):
+            return
+        
+        # Update settings
+        settings_manager = None
+        if hasattr(self.parent(), 'settings_manager'):
+            settings_manager = self.parent().settings_manager
+        else:
+            from core.settings import SettingsManager
+            settings_manager = SettingsManager()
+        
+        settings_manager.update_setting(f"{binary}_binary", path)
+        
+        # Store result
+        self.results[binary] = {
+            'path': path,
+            'source': source,
+            'configured': True
+        }
+    
+    def accept(self):
+        """Handle OK button - process any manually entered paths."""
+        # Check for manually entered paths
+        for binary, input_widget in self.binary_inputs.items():
+            path = input_widget.text().strip()
+            if path and os.path.isfile(path):
+                self._configure_binary(binary, path, "manually entered")
+            elif binary not in self.results:
+                # No path provided and not already configured
+                self.results[binary] = {
+                    'path': '',
+                    'source': 'skipped',
+                    'configured': False
+                }
+        
+        super().accept()
+    
+    def _skip_setup(self):
+        """Skip the binary setup."""
+        for binary in self.missing_binaries:
+            self.results[binary] = {
+                'path': '',
+                'source': 'skipped',
+                'configured': False
+            }
+        self.accept()
+    
+    def _show_error(self, title, message):
+        """Show an error message."""
+        try:
+            from myrientDownloaderGUI import show_styled_message_box
+            show_styled_message_box(QMessageBox.Critical, title, message, self)
+        except ImportError:
+            QMessageBox.critical(self, title, message)
+
+
+class BinaryValidationDialog(QDialog):
+    """Legacy dialog for backward compatibility."""
+    
+    def __init__(self, binary_type, parent=None):
+        super().__init__(parent)
+        self.binary_type = binary_type
+        
+        # Configure dialog based on binary type
+        if binary_type == "ps3dec":
+            self.setWindowTitle("PS3Dec Required")
+            message_text = (
+                "PS3Dec is required to decrypt PS3 ISOs.\n\n"
+                "This tool was not found on your system. Would you like to download it now?\n\n"
+                "Note: The download is approximately 233KB and will be saved to the application directory."
+            )
+        elif binary_type == "extractps3iso":
+            self.setWindowTitle("extractps3iso Required")
+            message_text = (
+                "extractps3iso is required to extract PS3 ISO contents.\n\n"
+                "This tool was not found on your system. Would you like to download it now?\n\n"
+                "Note: The download is approximately 600KB and will be saved to the application directory."
+            )
+        else:
+            self.setWindowTitle("Binary Required")
+            message_text = f"The {binary_type} tool is required but was not found on your system."
+        
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout()
+        
+        # Add explanation text
+        message = QLabel(message_text)
+        message.setWordWrap(True)
+        layout.addWidget(message)
+        
+        # Add buttons
+        buttons = QDialogButtonBox()
+        download_button = QPushButton(f"Download {binary_type}")
+        cancel_button = QPushButton("Cancel")
+        
+        buttons.addButton(download_button, QDialogButtonBox.AcceptRole)
+        buttons.addButton(cancel_button, QDialogButtonBox.RejectRole)
+        
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+        
+        # Connect signals
+        download_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        cancel_button.clicked.connect(self.reject)
+
+class BinaryValidationManager:
+    """Manages unified startup validation for PS3 binaries across all operating systems."""
+    
+    def __init__(self, settings_manager):
+        self.settings_manager = settings_manager
+    
+    def validate_startup_binaries(self, parent_widget=None):
+        """
+        Perform unified startup validation for PS3Dec and extractps3iso.
+        Shows a consolidated dialog for missing binaries on all operating systems.
+        Returns True to continue application startup.
+        """
+        missing_binaries = []
+        
+        # Check PS3Dec
+        if not self._is_binary_available('ps3dec'):
+            missing_binaries.append('ps3dec')
+        
+        # Check extractps3iso
+        if not self._is_binary_available('extractps3iso'):
+            missing_binaries.append('extractps3iso')
+        
+        # If no missing binaries, continue normally
+        if not missing_binaries:
+            return True
+        
+        # Show unified binary detection dialog
+        dialog = UnifiedBinaryDetectionDialog(missing_binaries, parent_widget)
+        
+        # Apply theme styling if needed
+        try:
+            from myrientDownloaderGUI import style_dialog_for_theme
+            style_dialog_for_theme(dialog)
+        except ImportError:
+            pass  # No styling available
+        
+        result = dialog.exec_()
+        
+        # Process results and show summary
+        if result == QDialog.Accepted:
+            self._show_setup_summary(dialog.results, parent_widget)
+        
+        # Always continue application startup
+        return True
+    
+    def _is_binary_available(self, binary_type):
+        """Check if a binary is available in configuration or PATH."""
+        if binary_type == 'ps3dec':
+            binary_path = self.settings_manager.ps3dec_binary
+            if binary_path and os.path.isfile(binary_path):
+                return True
+            # Check PATH
+            return shutil.which("ps3dec") or shutil.which("PS3Dec") or shutil.which("ps3dec.exe") or shutil.which("PS3Dec.exe")
+        
+        elif binary_type == 'extractps3iso':
+            binary_path = self.settings_manager.extractps3iso_binary
+            if binary_path and os.path.isfile(binary_path):
+                return True
+            # Check PATH
+            return shutil.which("extractps3iso") or shutil.which("extractps3iso.exe")
+        
+        return False
+    
+    def _show_setup_summary(self, results, parent_widget):
+        """Show a summary of the binary setup results."""
+        configured_count = sum(1 for r in results.values() if r.get('configured', False))
+        total_count = len(results)
+        
+        # Show a message if any binaries are missing
+        if configured_count < total_count:
+            # Get the names of missing binaries
+            missing_binaries = [bin_name for bin_name, result in results.items() 
+                               if not result.get('configured', False)]
+            
+            # Format the missing binaries list
+            missing_text = ""
+            for binary in missing_binaries:
+                binary_display_name = binary.upper() if binary == "ps3dec" else binary
+                missing_text += f"• {binary_display_name}\n"
+            
+            # Create appropriate message based on platform
+            is_windows = platform.system() == 'Windows'
+            
+            title = "Missing PS3 Tools"
+            message = (
+                f"The following PS3 tool(s) are missing or not configured:\n\n"
+                f"{missing_text}\n"
+                f"PS3 decryption & extraction functionality may be limited.\n\n"
+            )
+            
+            if is_windows:
+                message += "You can download these tools automatically through Settings → Binaries."
+            else:
+                message += "You can configure these tools through Settings → Binaries."
+            
+            icon = QMessageBox.Warning
+            
+            try:
+                from myrientDownloaderGUI import show_styled_message_box
+                show_styled_message_box(icon, title, message, parent_widget)
+            except ImportError:
+                QMessageBox.warning(parent_widget, title, message)
 
 def get_explanation_style():
-    """Get appropriate styling for explanation text based on dark mode."""
+    """Get appropriate styling for explanation text based on current theme."""
     # Import here to avoid circular imports
     try:
         from myrientDownloaderGUI import is_dark_mode
-        if is_dark_mode:
-            return "QLabel { background-color: #3c3c3c; color: #ffffff; padding: 10px; border-radius: 5px; border: 1px solid #767676; }"
+        if is_dark_mode():
+            return "QLabel { background-color: #404040; color: #ffffff; padding: 10px; border-radius: 5px; border: 1px solid #555555; }"
         else:
-            return "QLabel { background-color: #f0f0f0; color: #000000; padding: 10px; border-radius: 5px; }"
-    except ImportError:
+            return "QLabel { background-color: #f5f5f5; color: #2c2c2c; padding: 10px; border-radius: 5px; border: 1px solid #d0d0d0; }"
+    except (ImportError, TypeError):
         # Fallback to light theme if can't determine
-        return "QLabel { background-color: #f0f0f0; color: #000000; padding: 10px; border-radius: 5px; }"
+        return "QLabel { background-color: #f5f5f5; color: #2c2c2c; padding: 10px; border-radius: 5px; border: 1px solid #d0d0d0; }"
 
 class DirectoryManager:
     """Manages hierarchical directory structure for Myrient downloads."""
@@ -34,8 +374,8 @@ class DirectoryManager:
         # Root directory - configurable base for all downloads
         self.root_dir = self.settings.value('directories/root_dir', 'MyrientDownloads')
         
-        # Processing directory - separate from root, for temporary operations
-        self.processing_dir = self.settings.value('directories/processing_dir', 'processing')
+        # Processing directory - inside root download directory for better organization
+        self.processing_dir = self.settings.value('directories/processing_dir', os.path.join(self.root_dir, 'processing'))
         
         # Initialize directory structure
         self._init_directory_structure()
@@ -213,7 +553,8 @@ class DirectoryManager:
             'psxiso_dir': 'PSXISO',
             'pspiso_dir': 'PSPISO',
             'psn_pkg_dir': os.path.join('PSN', 'packages'),
-            'psn_rap_dir': os.path.join('PSN', 'exdata')
+            'psn_rap_dir': os.path.join('PSN', 'exdata'),
+            'processing_dir': 'processing'
         }
         
         # Add dynamic platform directories
@@ -290,6 +631,9 @@ class SettingsManager:
         self.ps3dec_binary = self.settings.value('binaries/ps3dec_binary', '')
         self.extractps3iso_binary = self.settings.value('binaries/extractps3iso_binary', '')
         
+        # Initialize binary validation manager
+        self.binary_validator = BinaryValidationManager(self)
+        
         # Clean up duplicate entries from old versions
         self._clean_up_duplicate_entries()
         
@@ -299,6 +643,13 @@ class SettingsManager:
         # Check binaries
         self.check_ps3dec_binary()
         self.check_extractps3iso_binary()
+    
+    def validate_startup_prerequisites(self, parent_widget=None):
+        """
+        Validate startup prerequisites for Windows systems.
+        This should be called during application startup.
+        """
+        return self.binary_validator.validate_startup_binaries(parent_widget)
     
     def _setup_directory_properties(self):
         """Setup directory properties for backwards compatibility."""
@@ -403,6 +754,13 @@ class SettingsManager:
         if ps3dec_in_path:
             self.ps3dec_binary = ps3dec_in_path
             self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
+        else:
+            # Check if it's in the config directory
+            config_dir = os.path.join(os.getcwd(), 'config')
+            config_binary = os.path.join(config_dir, "ps3dec.exe")
+            if os.path.isfile(config_binary):
+                self.ps3dec_binary = config_binary
+                self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
     
     def check_extractps3iso_binary(self):
         """Check if extractps3iso binary exists and is valid."""
@@ -420,11 +778,18 @@ class SettingsManager:
             self.extractps3iso_binary = extractps3iso_in_path
             self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
         else:
-            # Check if it's in the current directory
-            local_binary = os.path.join(os.getcwd(), binary_name)
-            if os.path.isfile(local_binary):
-                self.extractps3iso_binary = local_binary
+            # Check if it's in the config directory first
+            config_dir = os.path.join(os.getcwd(), 'config')
+            config_binary = os.path.join(config_dir, binary_name)
+            if os.path.isfile(config_binary):
+                self.extractps3iso_binary = config_binary
                 self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
+            else:
+                # Check if it's in the current directory (legacy location)
+                local_binary = os.path.join(os.getcwd(), binary_name)
+                if os.path.isfile(local_binary):
+                    self.extractps3iso_binary = local_binary
+                    self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
     
     def is_valid_binary(self, path, binary_name):
         """Check if the path points to a valid binary."""
@@ -441,13 +806,20 @@ class SettingsManager:
         if platform.system() == 'Windows':
             try:
                 print("Downloading PS3Dec from GitHub...")
+                
+                # Ensure config directory exists
+                config_dir = os.path.join(os.getcwd(), 'config')
+                os.makedirs(config_dir, exist_ok=True)
+                
+                # Download to config directory
+                ps3dec_path = os.path.join(config_dir, "ps3dec.exe")
                 urllib.request.urlretrieve(
-                    "https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe", 
-                    "ps3dec.exe"
+                    "https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe",
+                    ps3dec_path
                 )
-                self.ps3dec_binary = os.path.join(os.getcwd(), "ps3dec.exe")
+                self.ps3dec_binary = ps3dec_path
                 self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
-                print("PS3Dec downloaded successfully")
+                print(f"PS3Dec downloaded successfully to {ps3dec_path}")
                 return True
             except Exception as e:
                 print(f"Error downloading PS3Dec: {str(e)}")
@@ -455,41 +827,134 @@ class SettingsManager:
         return False
         
     def download_extractps3iso(self):
-        """Download the extractps3iso binary."""
+        """Download the extractps3iso binary with improved error handling and nested archive support."""
         if platform.system() == 'Windows':
+            # Use the specific fallback download URL directly
+            download_url = "https://github.com/bucanero/ps3iso-utils/releases/download/277db7de/ps3iso-277db7de-Win64.zip"
+            
             try:
-                print("Downloading extractps3iso from GitHub...")
+                print(f"Downloading extractps3iso from GitHub using URL: {download_url}...")
                 
-                # Create a temporary file to store the ZIP
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
-                    temp_path = temp_file.name
+                # Create temporary files for ZIP and TAR.GZ
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_zip:
+                    temp_zip_path = temp_zip.name
                 
-                # Download the ZIP file
-                urllib.request.urlretrieve(
-                    "https://github.com/bucanero/ps3iso-utils/releases/download/277db7de/ps3iso-277db7de-Win64.zip",
-                    temp_path
-                )
+                # Download the ZIP file with better error handling
+                try:
+                    urllib.request.urlretrieve(download_url, temp_zip_path)
+                except urllib.error.HTTPError as e:
+                    print(f"HTTP Error {e.code}: {e.reason}")
+                    raise
+                except urllib.error.URLError as e:
+                    print(f"URL Error: {e.reason}")
+                    raise
                 
-                # Extract the ZIP file
-                with zipfile.ZipFile(temp_path, 'r') as zip_ref:
-                    # Extract only the extractps3iso.exe file
-                    for file in zip_ref.namelist():
-                        if file.lower().endswith('extractps3iso.exe'):
-                            source = zip_ref.open(file)
-                            target = open(os.path.join(os.getcwd(), "extractps3iso.exe"), "wb")
-                            with source, target:
-                                shutil.copyfileobj(source, target)
+                # Extract the ZIP file and look for build.tar.gz
+                extractps3iso_found = False
+                with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
+                    # List all files to debug
+                    all_files = zip_ref.namelist()
+                    print(f"Files in ZIP: {all_files}")
+                    
+                    # Look for build.tar.gz
+                    tar_gz_file = None
+                    for file in all_files:
+                        if file.lower().endswith('build.tar.gz'):
+                            tar_gz_file = file
                             break
+                    
+                    if tar_gz_file:
+                        print(f"Found nested archive: {tar_gz_file}")
+                        
+                        # Extract build.tar.gz to a temporary location
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz') as temp_tar:
+                            temp_tar_path = temp_tar.name
+                        
+                        # Extract the tar.gz from the zip
+                        with zip_ref.open(tar_gz_file) as tar_source:
+                            with open(temp_tar_path, 'wb') as tar_target:
+                                shutil.copyfileobj(tar_source, tar_target)
+                        
+                        # Now extract the tar.gz and look for extractps3iso.exe
+                        import tarfile
+                        try:
+                            with tarfile.open(temp_tar_path, 'r:gz') as tar_ref:
+                                tar_files = tar_ref.getnames()
+                                print(f"Files in TAR.GZ: {tar_files}")
+                                
+                                # Look for extractps3iso.exe in the tar
+                                for tar_file in tar_files:
+                                    tar_file_lower = tar_file.lower()
+                                    if ('extractps3iso.exe' in tar_file_lower or
+                                        tar_file_lower.endswith('extractps3iso.exe') or
+                                        (tar_file_lower.endswith('.exe') and 'extractps3iso' in tar_file_lower)):
+                                        
+                                        print(f"Found extractps3iso binary in TAR: {tar_file}")
+                                        
+                                        # Ensure config directory exists
+                                        config_dir = os.path.join(os.getcwd(), 'config')
+                                        os.makedirs(config_dir, exist_ok=True)
+                                        
+                                        # Extract the specific file to config directory
+                                        member = tar_ref.getmember(tar_file)
+                                        member.name = "extractps3iso.exe"  # Rename to standard name
+                                        tar_ref.extract(member, config_dir)
+                                        
+                                        extractps3iso_found = True
+                                        break
+                        except Exception as tar_error:
+                            print(f"Error extracting TAR.GZ: {str(tar_error)}")
+                        finally:
+                            # Clean up tar.gz temp file
+                            try:
+                                os.unlink(temp_tar_path)
+                            except:
+                                pass
+                    else:
+                        # Fallback: try direct extraction from ZIP (old behavior)
+                        print("build.tar.gz not found, trying direct extraction from ZIP...")
+                        for file in all_files:
+                            file_lower = file.lower()
+                            if ('extractps3iso.exe' in file_lower or
+                                file_lower.endswith('extractps3iso.exe') or
+                                (file_lower.endswith('.exe') and 'extractps3iso' in file_lower)):
+                                
+                                print(f"Found extractps3iso binary: {file}")
+                                
+                                # Ensure config directory exists
+                                config_dir = os.path.join(os.getcwd(), 'config')
+                                os.makedirs(config_dir, exist_ok=True)
+                                
+                                # Extract the file to config directory
+                                source = zip_ref.open(file)
+                                target_path = os.path.join(config_dir, "extractps3iso.exe")
+                                
+                                with source, open(target_path, "wb") as target:
+                                    shutil.copyfileobj(source, target)
+                                
+                                extractps3iso_found = True
+                                break
                 
                 # Delete the temporary ZIP file
-                os.unlink(temp_path)
+                try:
+                    os.unlink(temp_zip_path)
+                except:
+                    pass  # Ignore cleanup errors
                 
-                # Update the binary path
-                self.extractps3iso_binary = os.path.join(os.getcwd(), "extractps3iso.exe")
-                self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
-                
-                print("extractps3iso downloaded and extracted successfully")
-                return True
+                if extractps3iso_found:
+                    # Update the binary path to config directory
+                    config_dir = os.path.join(os.getcwd(), 'config')
+                    extractps3iso_path = os.path.join(config_dir, "extractps3iso.exe")
+                    
+                    self.extractps3iso_binary = extractps3iso_path
+                    self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
+                    
+                    print(f"extractps3iso downloaded and extracted successfully to {extractps3iso_path}")
+                    return True
+                else:
+                    print("extractps3iso.exe not found in the downloaded archive")
+                    return False
+            
             except Exception as e:
                 print(f"Error downloading extractps3iso: {str(e)}")
                 return False
@@ -535,8 +1000,6 @@ class SettingsManager:
         elif key in ['myrient_base_dir', 'root_dir']:
             old_root = self.myrient_base_dir
             self.myrient_base_dir = value
-            self.directory_manager.root_dir = value
-            
             # Update platform directories if they were using default structure
             self.directory_manager._update_platform_dirs_on_root_change(old_root, value)
             
@@ -585,6 +1048,7 @@ class SettingsDialog(QDialog):
         # Dictionary to store all input widgets
         self.directory_inputs = {}
         self.binary_inputs = {}
+        self.appearance_inputs = {}
         
         self.initUI()
         
@@ -604,7 +1068,11 @@ class SettingsDialog(QDialog):
         
         # Binary Tools Tab
         binaries_tab = self.create_binaries_tab()
-        tab_widget.addTab(binaries_tab, "Binary Tools")
+        tab_widget.addTab(binaries_tab, "Binaries")
+        
+        # Appearance Tab
+        appearance_tab = self.create_appearance_tab()
+        tab_widget.addTab(appearance_tab, "Appearance")
         
         main_layout.addWidget(tab_widget)
         
@@ -617,13 +1085,13 @@ class SettingsDialog(QDialog):
         reset_button.clicked.connect(self.reset_to_defaults)
         button_layout.addWidget(reset_button)
         
-        ok_button = QPushButton("OK")
-        ok_button.clicked.connect(self.save_settings)
+        save_settings_button = QPushButton("Save Settings")
+        save_settings_button.clicked.connect(self.save_settings)
         
         cancel_button = QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
         
-        button_layout.addWidget(ok_button)
+        button_layout.addWidget(save_settings_button)
         button_layout.addWidget(cancel_button)
         
         main_layout.addLayout(button_layout)
@@ -812,9 +1280,13 @@ class SettingsDialog(QDialog):
         
         # Binary explanation
         binary_explanation = QLabel(
-            "Binary Tools Info:\n"
+            "Binary Info:\n"
             "• PS3Dec: Required for decrypting PlayStation 3 ISO files\n"
+            "  - Author: Redrrx\n"
+            "  - Source: https://github.com/Redrrx/ps3dec\n"
             "• extractps3iso: Required for extracting PlayStation 3 ISO contents\n"
+            "  - Author: bucanero\n"
+            "  - Source: https://github.com/bucanero/ps3iso-utils\n"
             "• Windows: Use the Download buttons to automatically download these tools\n"
             "• Arch Linux: Install ps3iso-utils-git and ps3dec-git from the AUR\n"
             "• These tools will be automatically detected if installed in your system PATH\n"
@@ -823,6 +1295,65 @@ class SettingsDialog(QDialog):
         binary_explanation.setWordWrap(True)
         binary_explanation.setStyleSheet(get_explanation_style())
         layout.addWidget(binary_explanation)
+        
+        layout.addStretch(1)
+        return widget
+    
+    def create_appearance_tab(self):
+        """Create the appearance configuration tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Theme Section
+        theme_group = QGroupBox("Theme Settings")
+        theme_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
+        theme_layout = QFormLayout()
+        
+        # Get current theme setting
+        try:
+            from PyQt5.QtCore import QSettings
+            app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
+            current_theme = app_settings.value('appearance/theme', 'auto')
+        except Exception:
+            current_theme = 'auto'
+        
+        # Theme selection
+        from PyQt5.QtWidgets import QComboBox
+        self.theme_combo = QComboBox()
+        theme_options = [
+            ('auto', 'Auto (Follow System)'),
+            ('light', 'Light Theme'),
+            ('dark', 'Dark Theme'),
+            ('system', 'System Default (Qt Native)')
+        ]
+        
+        for value, display_name in theme_options:
+            self.theme_combo.addItem(display_name, value)
+        
+        # Set current selection
+        for i in range(self.theme_combo.count()):
+            if self.theme_combo.itemData(i) == current_theme:
+                self.theme_combo.setCurrentIndex(i)
+                break
+        
+        theme_layout.addRow("Application Theme:", self.theme_combo)
+        self.appearance_inputs['theme'] = self.theme_combo
+        
+        theme_group.setLayout(theme_layout)
+        layout.addWidget(theme_group)
+        
+        # Theme explanation
+        theme_explanation = QLabel(
+            "Theme Options:\n"
+            "• Auto: Automatically detects your system's theme preference\n"
+            "• Light Theme: Always use the light color scheme\n"
+            "• Dark Theme: Always use the dark color scheme\n"
+            "• System Default: Use Qt's native system theme\n\n"
+            "Changes will take effect after restarting the application."
+        )
+        theme_explanation.setWordWrap(True)
+        theme_explanation.setStyleSheet(get_explanation_style())
+        layout.addWidget(theme_explanation)
         
         layout.addStretch(1)
         return widget
@@ -892,14 +1423,15 @@ class SettingsDialog(QDialog):
         # Check if platform directories are using default structure relative to old root
         platform_updates = {}
         
-        # PlayStation directories
+        # PlayStation directories and processing directory
         platform_configs = {
             'ps3iso_dir': 'PS3ISO',
             'ps2iso_dir': 'PS2ISO',
             'psxiso_dir': 'PSXISO',
             'pspiso_dir': 'PSPISO',
             'psn_pkg_dir': os.path.join('PSN', 'packages'),
-            'psn_rap_dir': os.path.join('PSN', 'exdata')
+            'psn_rap_dir': os.path.join('PSN', 'exdata'),
+            'processing_dir': 'processing'
         }
         
         # Add dynamic platform directories
@@ -940,7 +1472,7 @@ class SettingsDialog(QDialog):
             # Reset directory inputs to defaults
             default_root = 'MyrientDownloads'
             self.root_dir_input.setText(default_root)
-            self.processing_dir_input.setText('processing')
+            self.processing_dir_input.setText(os.path.join(default_root, 'processing'))
             
             # Reset PlayStation directories
             self.directory_inputs['ps3iso_dir'].setText(os.path.join(default_root, 'PS3ISO'))
@@ -962,6 +1494,13 @@ class SettingsDialog(QDialog):
             # Reset binary inputs
             self.ps3dec_input.setText('')
             self.extractps3iso_input.setText('')
+            
+            # Reset theme to auto
+            if hasattr(self, 'theme_combo'):
+                for i in range(self.theme_combo.count()):
+                    if self.theme_combo.itemData(i) == 'auto':
+                        self.theme_combo.setCurrentIndex(i)
+                        break
             
             # Update the original root reference
             self._original_root = default_root
@@ -1071,6 +1610,17 @@ class SettingsDialog(QDialog):
             for key, input_widget in self.binary_inputs.items():
                 binary_path = input_widget.text().strip()
                 self.settings_manager.update_setting(key, binary_path)
+            
+            # Save appearance settings
+            if hasattr(self, 'appearance_inputs'):
+                for key, input_widget in self.appearance_inputs.items():
+                    if key == 'theme':
+                        theme_value = input_widget.currentData()
+                        if theme_value:
+                            from PyQt5.QtCore import QSettings
+                            app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
+                            app_settings.setValue('appearance/theme', theme_value)
+                            app_settings.sync()
             
             # Show errors if any occurred
             if error_messages:

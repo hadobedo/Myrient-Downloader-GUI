@@ -8,7 +8,7 @@ from PyQt5.QtGui import QColor
 
 from core.ps3_fileprocessor import PS3FileProcessor
 from threads.processing_threads import UnzipRunner, CommandRunner, SplitIsoThread, SplitPkgThread
-from gui.check_prereq_binaries_dialog import PrereqBinaryDialog
+from core.settings import BinaryValidationDialog
 
 
 class ProcessingManager(QObject):
@@ -521,8 +521,9 @@ class ProcessingManager(QObject):
     def _extract_ps3_iso(self, processor, iso_path, base_name, queue_position, settings, final_target_dir, organize_content):
         """Extract PS3 ISO contents."""
         if not os.path.isfile(self.settings_manager.extractps3iso_binary):
-            # Need to check/download extractps3iso
-            dialog = PrereqBinaryDialog("extractps3iso", self.parent())
+            # Need to check/download extractps3iso using the new validation system
+            from core.settings import BinaryValidationDialog
+            dialog = BinaryValidationDialog("extractps3iso", self.parent())
             if dialog.exec_():
                 if not self.settings_manager.download_extractps3iso():
                     self.output_window.append(f"({queue_position}) Failed to download extractps3iso. ISO extraction will not be available.")

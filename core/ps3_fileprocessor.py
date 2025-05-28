@@ -108,15 +108,22 @@ class PS3FileProcessor:
         expected_extraction_dir = os.path.join(parent_dir, base_name)
         
         try:
-            # Check if extractps3iso is available
-            extract_tool = shutil.which('extractps3iso')
+            # Check if extractps3iso is available - use settings manager first
+            extract_tool = None
+            if hasattr(self, 'settings_manager') and self.settings_manager.extractps3iso_binary:
+                if os.path.isfile(self.settings_manager.extractps3iso_binary):
+                    extract_tool = self.settings_manager.extractps3iso_binary
             
+            # Fallback to PATH if not found in settings
             if not extract_tool:
-                self.output_window.append("extractps3iso tool not found. Please install it.")
+                extract_tool = shutil.which('extractps3iso') or shutil.which('extractps3iso.exe')
+
+            if not extract_tool:
+                self.output_window.append("extractps3iso tool not found. Please install it or configure it in settings.")
                 return (False, expected_extraction_dir)
 
             self.output_window.append(f"Extracting PS3 ISO using extractps3iso: {iso_path}")
-            
+
             # Run the extractps3iso command - extract to parent directory
             # Let extractps3iso create the folder structure naturally
             cmd = [extract_tool, iso_path, parent_dir]
