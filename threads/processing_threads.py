@@ -31,7 +31,8 @@ class SplitPkgThread(QThread):
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
-                    with open(f"{Path(self.file_path).stem}.pkg.666{str(i).zfill(2)}", 'wb') as chunk_file:
+                    split_file_path = os.path.join(os.path.dirname(self.file_path), f"{Path(self.file_path).stem}.pkg.666{str(i).zfill(2)}")
+                    with open(split_file_path, 'wb') as chunk_file:
                         chunk_file.write(chunk)
                     progress_text = f"Splitting {self.file_path}: part {i+1}/{num_parts} complete"
                     # print(progress_text)  # Removed: This will be handled by the connected signal
@@ -115,12 +116,12 @@ class CommandRunner(QThread):
             
             if self.process.returncode != 0:
                 error_msg = f"Error: Command failed with return code {self.process.returncode}"
-                print(error_msg)
+                # Error message will be emitted via signal
                 self.output_signal.emit(error_msg)
                 self.error_signal.emit(error_msg)
         except Exception as e:
             error_msg = f"Exception in command execution: {str(e)}"
-            print(error_msg)
+            # Error message will be emitted via signal
             self.error_signal.emit(error_msg)
         finally:
             # Notify that we're done
@@ -164,6 +165,61 @@ class UnzipRunner(QThread):
         self.paused = False
         self.partial_files = []  # Track files being extracted
 
+    def _should_preserve_folder_structure(self, zip_ref):
+        """
+        Determine if folder structure should be preserved based on zip contents.
+        Returns (should_preserve, common_root_folder)
+        """
+        zip_base_name = os.path.splitext(os.path.basename(self.zip_path))[0]
+        file_list = zip_ref.infolist()
+        
+        if not file_list:
+            return False, None
+            
+        # Get all top-level entries (files and directories)
+        top_level_entries = set()
+        for info in file_list:
+            # Normalize path separators
+            normalized_path = info.filename.replace('\\', '/')
+            # Skip empty entries
+            if not normalized_path or normalized_path == '/':
+                continue
+            # Get the first path component
+            first_component = normalized_path.split('/')[0]
+            if first_component:
+                top_level_entries.add(first_component)
+        
+        # If there's exactly one top-level directory, check if it differs from zip name
+        if len(top_level_entries) == 1:
+            top_level_dir = list(top_level_entries)[0]
+            
+            # Check if this top-level entry is actually a directory
+            # (look for files that are inside this directory)
+            is_directory = any(
+                info.filename.replace('\\', '/').startswith(top_level_dir + '/')
+                for info in file_list
+                if info.filename.replace('\\', '/') != top_level_dir
+            )
+            
+            if is_directory and top_level_dir != zip_base_name:
+                # Removed "Preserving folder structure" print to clean up logs
+                return True, top_level_dir
+        
+        # Removed "Flattening structure" print to clean up logs
+        return False, None
+
+    def _get_extraction_path(self, info, preserve_structure, common_root):
+        """
+        Get the extraction path for a file based on preservation settings.
+        """
+        if preserve_structure:
+            # Preserve the full directory structure
+            normalized_path = info.filename.replace('\\', '/')
+            return os.path.join(self.output_path, normalized_path)
+        else:
+            # Flatten the structure (original behavior)
+            return os.path.join(self.output_path, os.path.basename(info.filename))
+
     def run(self):
         if not self.zip_path.lower().endswith('.zip'):
             print(f"File {self.zip_path} is not a .zip file. Skipping unzip.")
@@ -179,31 +235,48 @@ class UnzipRunner(QThread):
                 total_size = sum([info.file_size for info in zip_ref.infolist()])
                 extracted_size = 0
 
+                # Determine extraction strategy
+                preserve_structure, common_root = self._should_preserve_folder_structure(zip_ref)
+
                 # Get list of files in the zip
                 file_list = zip_ref.infolist()
+                file_count = len([info for info in file_list if not (info.filename.endswith('/') or info.filename.endswith('\\'))])
+                processed_files = 0
                 
                 for info in file_list:
+                    # Skip directory entries (they don't contain actual file data)
+                    if info.filename.endswith('/') or info.filename.endswith('\\'):
+                        continue
+                        
                     # Check if we are paused
                     if self.paused:
-                        print("Unzip paused, cleaning up partial files...")
+                        # Unzip paused, cleanup will be handled
                         self.cleanup_partial_files()
                         self.unzip_paused_signal.emit()
                         return
                     
                     # Check if we are stopped
                     if not self.running:
-                        print("Unzip stopped")
+                        # Unzip stopped
                         self.cleanup_partial_files()  # Clean up when stopped too
                         return
 
-                    file_out_path = os.path.join(self.output_path, os.path.basename(info.filename))
+                    file_out_path = self._get_extraction_path(info, preserve_structure, common_root)
                     
+                    # Create directories if needed for structure preservation
+                    os.makedirs(os.path.dirname(file_out_path), exist_ok=True)
                     # Skip if file already exists and is complete (for resuming)
                     if os.path.exists(file_out_path) and os.path.getsize(file_out_path) == info.file_size:
-                        print(f"File {file_out_path} already exists and is complete. Skipping.")
+                        # File already exists and is complete, skipping
                         self.extracted_files.append(file_out_path)
                         extracted_size += info.file_size
-                        self.progress_signal.emit(int((extracted_size / total_size) * 100))
+                        processed_files += 1
+                        
+                        # Update progress for skipped files too
+                        size_progress = (extracted_size / total_size) * 100 if total_size > 0 else 0
+                        file_progress = (processed_files / file_count) * 100 if file_count > 0 else 0
+                        progress_percent = max(size_progress, file_progress)
+                        self.progress_signal.emit(int(min(progress_percent, 100)))
                         continue
                     
                     # Add to partial files since we're going to extract it
@@ -213,11 +286,24 @@ class UnzipRunner(QThread):
                         with zip_ref.open(info) as source, open(file_out_path, 'wb') as target:
                             # Use a buffer size of 8MB for faster copying
                             buffer_size = 8 * 1024 * 1024  # 8MB chunks
+                            bytes_written = 0
+                            file_size = info.file_size
+                            
                             while self.running and not self.paused:  # Check flags in loop
                                 chunk = source.read(buffer_size)
                                 if not chunk:
                                     break
                                 target.write(chunk)
+                                bytes_written += len(chunk)
+                                
+                                # For large files, emit progress updates during extraction
+                                if file_size > 50 * 1024 * 1024:  # Files larger than 50MB
+                                    file_progress_within = (bytes_written / file_size) if file_size > 0 else 0
+                                    overall_file_progress = (processed_files + file_progress_within) / file_count if file_count > 0 else 0
+                                    overall_size_progress = (extracted_size + bytes_written) / total_size if total_size > 0 else 0
+                                    
+                                    progress_percent = max(overall_file_progress * 100, overall_size_progress * 100)
+                                    self.progress_signal.emit(int(min(progress_percent, 100)))
                                 
                                 # Periodically check if we should stop
                                 QApplication.processEvents()
@@ -231,7 +317,15 @@ class UnzipRunner(QThread):
                     if self.running and not self.paused:  # Only count if not stopped/paused
                         self.extracted_files.append(file_out_path)
                         extracted_size += info.file_size
-                        self.progress_signal.emit(int((extracted_size / total_size) * 100))
+                        processed_files += 1
+                        
+                        # Emit progress based on both size and file count for more responsive updates
+                        size_progress = (extracted_size / total_size) * 100 if total_size > 0 else 0
+                        file_progress = (processed_files / file_count) * 100 if file_count > 0 else 0
+                        
+                        # Use the maximum of the two progress calculations for better responsiveness
+                        progress_percent = max(size_progress, file_progress)
+                        self.progress_signal.emit(int(min(progress_percent, 100)))
         except FileNotFoundError as e:
             print(f"Error during unzip operation: {str(e)}")
             # No need to clean up since the file doesn't exist
@@ -240,12 +334,25 @@ class UnzipRunner(QThread):
             self.cleanup_partial_files()
 
     def cleanup_partial_files(self):
-        """Remove partially extracted files"""
+        """Remove partially extracted files and empty directories"""
         for file_path in self.partial_files:
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    print(f"Removed partial file: {file_path}")
+                    # Removed partial file during cleanup
+                    
+                    # Try to remove empty parent directories
+                    parent_dir = os.path.dirname(file_path)
+                    while parent_dir and parent_dir != self.output_path:
+                        try:
+                            if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                                os.rmdir(parent_dir)
+                                # Removed empty directory during cleanup
+                                parent_dir = os.path.dirname(parent_dir)
+                            else:
+                                break
+                        except OSError:
+                            break
             except Exception as e:
                 print(f"Error removing partial file {file_path}: {e}")
         

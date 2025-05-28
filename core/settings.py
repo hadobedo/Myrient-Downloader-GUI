@@ -4,32 +4,274 @@ import platform
 import urllib.request
 import zipfile
 import tempfile
-from PyQt5.QtCore import QSettings
+from PyQt5.QtCore import QSettings, Qt
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QFileDialog, QGroupBox, QFormLayout,
+    QMessageBox, QScrollArea, QWidget, QTabWidget
+)
+
+def get_explanation_style():
+    """Get appropriate styling for explanation text based on dark mode."""
+    # Import here to avoid circular imports
+    try:
+        from myrientDownloaderGUI import is_dark_mode
+        if is_dark_mode:
+            return "QLabel { background-color: #3c3c3c; color: #ffffff; padding: 10px; border-radius: 5px; border: 1px solid #767676; }"
+        else:
+            return "QLabel { background-color: #f0f0f0; color: #000000; padding: 10px; border-radius: 5px; }"
+    except ImportError:
+        # Fallback to light theme if can't determine
+        return "QLabel { background-color: #f0f0f0; color: #000000; padding: 10px; border-radius: 5px; }"
+
+class DirectoryManager:
+    """Manages hierarchical directory structure for Myrient downloads."""
+    
+    def __init__(self, settings, config_manager=None):
+        self.settings = settings
+        self.config_manager = config_manager
+        
+        # Root directory - configurable base for all downloads
+        self.root_dir = self.settings.value('directories/root_dir', 'MyrientDownloads')
+        
+        # Processing directory - separate from root, for temporary operations
+        self.processing_dir = self.settings.value('directories/processing_dir', 'processing')
+        
+        # Initialize directory structure
+        self._init_directory_structure()
+    
+    def _init_directory_structure(self):
+        """Initialize the hierarchical directory structure."""
+        # PlayStation 3 content
+        self.ps3iso_dir = self.settings.value(
+            'directories/ps3iso_dir',
+            os.path.join(self.root_dir, 'PS3ISO')
+        )
+        
+        # PlayStation 2 content
+        self.ps2iso_dir = self.settings.value(
+            'directories/ps2iso_dir',
+            os.path.join(self.root_dir, 'PS2ISO')
+        )
+        
+        # PlayStation 1/PSX content
+        self.psxiso_dir = self.settings.value(
+            'directories/psxiso_dir',
+            os.path.join(self.root_dir, 'PSXISO')
+        )
+        
+        # PlayStation Portable content
+        self.pspiso_dir = self.settings.value(
+            'directories/pspiso_dir',
+            os.path.join(self.root_dir, 'PSPISO')
+        )
+        
+        # PlayStation Network content - hierarchical structure
+        psn_base = os.path.join(self.root_dir, 'PSN')
+        self.psn_rap_dir = self.settings.value(
+            'directories/psn_rap_dir',
+            os.path.join(psn_base, 'exdata')
+        )
+        self.psn_pkg_dir = self.settings.value(
+            'directories/psn_pkg_dir',
+            os.path.join(psn_base, 'packages')
+        )
+        
+        # Dynamic platform directories from configuration
+        self._init_dynamic_platform_dirs()
+    
+    def _init_dynamic_platform_dirs(self):
+        """Initialize directories for platforms defined in myrient_urls.yaml."""
+        if not self.config_manager:
+            return
+            
+        platforms = self.config_manager.get_platforms()
+        for platform_id in platforms.keys():
+            # Skip predefined platforms
+            if platform_id in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                continue
+                
+            # Create dynamic directory using uppercase platform identifier
+            attr_name = f"{platform_id.lower()}_dir"
+            default_dir = os.path.join(self.root_dir, platform_id.upper())
+            
+            directory = self.settings.value(f'directories/{platform_id}_dir', default_dir)
+            setattr(self, attr_name, directory)
+    
+    def get_platform_directory(self, platform_id):
+        """Get the output directory for a specific platform."""
+        # Handle Xbox 360 variants - they should use the same base directory unless specifically configured
+        if platform_id in ['xbox360digital', 'xbox360tu']:
+            # Check if there's a specific directory configured for this variant
+            attr_name = f"{platform_id.lower()}_dir"
+            if hasattr(self, attr_name):
+                return getattr(self, attr_name)
+            # Fall back to the main xbox360 directory
+            elif hasattr(self, 'xbox360_dir'):
+                return getattr(self, 'xbox360_dir')
+            else:
+                # Create based on the variant name
+                return os.path.join(self.root_dir, platform_id.upper())
+        
+        # Standard platform handling
+        attr_name = f"{platform_id.lower()}_dir"
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+        
+        # Fallback for unknown platforms
+        return os.path.join(self.root_dir, platform_id.upper())
+    
+    def create_all_directories(self):
+        """Create all configured directories."""
+        directories_to_create = [
+            self.root_dir,
+            self.processing_dir,
+            self.ps3iso_dir,
+            self.ps2iso_dir,
+            self.psxiso_dir,
+            self.pspiso_dir,
+            self.psn_rap_dir,
+            self.psn_pkg_dir
+        ]
+        
+        # Add dynamic platform directories
+        if self.config_manager:
+            platforms = self.config_manager.get_platforms()
+            for platform_id in platforms.keys():
+                if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                    attr_name = f"{platform_id.lower()}_dir"
+                    if hasattr(self, attr_name):
+                        directories_to_create.append(getattr(self, attr_name))
+        
+        # Create directories with error handling
+        failed_dirs = []
+        for directory in directories_to_create:
+            if directory:  # Only create if directory path is not empty
+                try:
+                    os.makedirs(directory, exist_ok=True)
+                except Exception as e:
+                    failed_dirs.append((directory, str(e)))
+        
+        return failed_dirs
+    
+    def validate_directory_path(self, path):
+        """Validate a directory path and return validation result."""
+        if not path:
+            return False, "Directory path cannot be empty"
+        
+        try:
+            # Normalize the path
+            normalized_path = os.path.normpath(os.path.abspath(path))
+            
+            # Check if we can create the directory
+            os.makedirs(normalized_path, exist_ok=True)
+            
+            # Check if we can write to it
+            test_file = os.path.join(normalized_path, '.write_test')
+            try:
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+            except Exception:
+                return False, "Directory is not writable"
+            
+            return True, normalized_path
+            
+        except Exception as e:
+            return False, f"Invalid directory path: {str(e)}"
+    
+    def update_directory(self, directory_type, new_path):
+        """Update a directory path and save to settings."""
+        valid, result = self.validate_directory_path(new_path)
+        if not valid:
+            raise ValueError(result)
+        
+        # Save to settings
+        self.settings.setValue(f'directories/{directory_type}', result)
+        
+        # Update instance attribute
+        if directory_type == 'root_dir':
+            old_root = self.root_dir
+            self.root_dir = result
+            # Update related platform directories if they were using default structure
+            self._update_platform_dirs_on_root_change(old_root, result)
+        elif directory_type == 'processing_dir':
+            self.processing_dir = result
+        elif hasattr(self, directory_type):
+            setattr(self, directory_type, result)
+        return result
+    
+    def _update_platform_dirs_on_root_change(self, old_root, new_root):
+        """Update platform directories when root directory changes."""
+        if not old_root or not new_root or old_root == new_root:
+            return
+        
+        # Define default platform directory structures
+        platform_mappings = {
+            'ps3iso_dir': 'PS3ISO',
+            'ps2iso_dir': 'PS2ISO',
+            'psxiso_dir': 'PSXISO',
+            'pspiso_dir': 'PSPISO',
+            'psn_pkg_dir': os.path.join('PSN', 'packages'),
+            'psn_rap_dir': os.path.join('PSN', 'exdata')
+        }
+        
+        # Add dynamic platform directories
+        if self.config_manager:
+            platforms = self.config_manager.get_platforms()
+            for platform_id in platforms.keys():
+                if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                    attr_name = f"{platform_id.lower()}_dir"
+                    platform_mappings[attr_name] = platform_id.upper()
+        
+        # Update directories that are using the default structure
+        for attr_name, subdir in platform_mappings.items():
+            if hasattr(self, attr_name):
+                current_path = getattr(self, attr_name)
+                
+                # Check multiple possible old root paths that might be in use
+                possible_old_paths = [
+                    os.path.join(old_root, subdir),
+                    os.path.join('MyrientDownloads', subdir),  # Default fallback
+                    os.path.join('/home/nick/Myrient-Downloader-GUI/MyrientDownloads', subdir)  # Full path fallback
+                ]
+                
+                # Check if current path matches any of the old default structures
+                should_update = False
+                for expected_old_path in possible_old_paths:
+                    if (current_path == expected_old_path or
+                        current_path == os.path.normpath(expected_old_path)):
+                        should_update = True
+                        break
+                
+                if should_update:
+                    # Update to new root structure
+                    new_path = os.path.join(new_root, subdir)
+                    setattr(self, attr_name, new_path)
+                    
+                    # Update in settings - use correct key format
+                    self.settings.setValue(f'directories/{attr_name}', new_path)
+                    
+                    # Clean up any old entries in the General section
+                    try:
+                        self.settings.remove(f'General/{attr_name}')
+                    except:
+                        pass  # Ignore if the key doesn't exist
 
 class SettingsManager:
     """Manages application settings and configuration."""
     
     def __init__(self, config_manager=None):
-        self.settings = QSettings('./myrientDownloaderGUI.ini', QSettings.IniFormat)
+        self.settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
         
         # Store config_manager if provided
         self.config_manager = config_manager
         
-        # Load settings with defaults
-        self.ps3dec_binary = self.settings.value('ps3dec_binary', '')
-        self.ps3iso_dir = self.settings.value('ps3iso_dir', 'MyrientDownloads/PS3ISO')
-        self.psn_pkg_dir = self.settings.value('psn_pkg_dir', 'MyrientDownloads/packages')
-        self.psn_rap_dir = self.settings.value('psn_rap_dir', 'MyrientDownloads/exdata')
-        self.ps2iso_dir = self.settings.value('ps2iso_dir', 'MyrientDownloads/PS2ISO')
-        self.psxiso_dir = self.settings.value('psxiso_dir', 'MyrientDownloads/PSXISO')
-        self.pspiso_dir = self.settings.value('pspiso_dir', 'MyrientDownloads/PSPISO')
+        # Initialize directory manager
+        self.directory_manager = DirectoryManager(self.settings, config_manager)
         
-        # Determine the base MyrientDownloads directory from existing paths
-        self.myrient_base_dir = self._determine_base_dir()
-        
-        # Set processing directory inside MyrientDownloads
-        self.processing_dir = self.settings.value('processing_dir', 
-                                               os.path.join(self.myrient_base_dir, 'processing'))
+        # Expose directory properties for backwards compatibility
+        self._setup_directory_properties()
         
         # Load checkbox settings with defaults
         self.decrypt_iso = self._load_bool_setting('decrypt_iso', True)
@@ -38,11 +280,18 @@ class SettingsManager:
         self.keep_dkey_file = self._load_bool_setting('keep_dkey_file', False)
         self.keep_unsplit_file = self._load_bool_setting('keep_unsplit_file', False)
         self.split_pkg = self._load_bool_setting('split_pkg', True)
-        self.extract_ps3_iso = self._load_bool_setting('extract_ps3_iso', False)  # New setting, default to False
-        self.keep_decrypted_iso_after_extraction = self._load_bool_setting('keep_decrypted_iso_after_extraction', True)  # New setting
+        self.extract_ps3_iso = self._load_bool_setting('extract_ps3_iso', False)
+        self.keep_decrypted_iso_after_extraction = self._load_bool_setting('keep_decrypted_iso_after_extraction', True)
+        
+        # Universal content organization setting (now applies to all platforms)
+        self.organize_content_to_folders = self._load_bool_setting('organize_content_to_folders', False)
         
         # Load binary paths
-        self.extractps3iso_binary = self.settings.value('extractps3iso_binary', '')
+        self.ps3dec_binary = self.settings.value('binaries/ps3dec_binary', '')
+        self.extractps3iso_binary = self.settings.value('binaries/extractps3iso_binary', '')
+        
+        # Clean up duplicate entries from old versions
+        self._clean_up_duplicate_entries()
         
         # Create directories
         self.create_directories()
@@ -51,35 +300,72 @@ class SettingsManager:
         self.check_ps3dec_binary()
         self.check_extractps3iso_binary()
     
-    def _determine_base_dir(self):
-        """Determine the base MyrientDownloads directory from existing paths."""
-        # Check if paths like ps3iso_dir have a common parent directory
-        dirs = [
-            self.ps3iso_dir,
-            self.ps2iso_dir,
-            self.psxiso_dir,
-            self.pspiso_dir,
-            self.psn_pkg_dir
+    def _setup_directory_properties(self):
+        """Setup directory properties for backwards compatibility."""
+        # Root and processing directories
+        self.myrient_base_dir = self.directory_manager.root_dir
+        self.processing_dir = self.directory_manager.processing_dir
+        
+        # Platform-specific directories
+        self.ps3iso_dir = self.directory_manager.ps3iso_dir
+        self.ps2iso_dir = self.directory_manager.ps2iso_dir
+        self.psxiso_dir = self.directory_manager.psxiso_dir
+        self.pspiso_dir = self.directory_manager.pspiso_dir
+        self.psn_rap_dir = self.directory_manager.psn_rap_dir
+        self.psn_pkg_dir = self.directory_manager.psn_pkg_dir
+        
+        # Dynamic platform directories
+        if self.config_manager:
+            platforms = self.config_manager.get_platforms()
+            for platform_id in platforms.keys():
+                if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                    attr_name = f"{platform_id.lower()}_dir"
+                    if hasattr(self.directory_manager, attr_name):
+                        setattr(self, attr_name, getattr(self.directory_manager, attr_name))
+    
+    def _clean_up_duplicate_entries(self):
+        """Clean up duplicate directory entries from the General section."""
+        # List of directory keys that should only be in the directories section
+        directory_keys = [
+            'gamecube_dir', 'processing_dir', 'ps2_dir', 'ps2iso_dir', 'ps3_dir', 'ps3iso_dir',
+            'psn_pkg_dir', 'psn_rap_dir', 'psp_dir', 'pspiso_dir', 'psx_dir', 'psxiso_dir',
+            'wii_dir', 'root_dir'
         ]
         
-        # Filter out paths that don't exist yet or are absolute
-        existing_dirs = [d for d in dirs if d and not os.path.isabs(d)]
+        # Add dynamic platform directories if config manager is available
+        if self.config_manager:
+            platforms = self.config_manager.get_platforms()
+            for platform_id in platforms.keys():
+                if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                    directory_keys.append(f"{platform_id.lower()}_dir")
         
-        if existing_dirs:
-            # Look for common parent directory 'MyrientDownloads'
-            for path in existing_dirs:
-                parts = path.split(os.sep)
-                if 'MyrientDownloads' in parts:
-                    # Found a path with MyrientDownloads, use it as base
-                    return os.path.join(*parts[:parts.index('MyrientDownloads')+1])
+        # Remove duplicate entries from General section
+        for key in directory_keys:
+            if self.settings.contains(f'General/{key}'):
+                # If there's no corresponding entry in directories section, move it
+                if not self.settings.contains(f'directories/{key}'):
+                    value = self.settings.value(f'General/{key}')
+                    if value:
+                        self.settings.setValue(f'directories/{key}', value)
                 
-            # If no directory contains 'MyrientDownloads', use parent of first existing dir
-            base_dir = os.path.dirname(existing_dirs[0])
-            if base_dir:
-                return base_dir
+                # Remove from General section
+                self.settings.remove(f'General/{key}')
         
-        # Default to MyrientDownloads in current directory
-        return 'MyrientDownloads'
+        # Also clean up binary entries that might be in wrong section
+        binary_keys = ['extractps3iso_binary', 'ps3dec_binary']
+        for key in binary_keys:
+            if self.settings.contains(f'General/{key}'):
+                # If there's no corresponding entry in binaries section, move it
+                if not self.settings.contains(f'binaries/{key}'):
+                    value = self.settings.value(f'General/{key}')
+                    if value:
+                        self.settings.setValue(f'binaries/{key}', value)
+                
+                # Remove from General section
+                self.settings.remove(f'General/{key}')
+        
+        # Sync changes to file
+        self.settings.sync()
     
     def _load_bool_setting(self, key, default):
         """Load a boolean setting with proper type conversion."""
@@ -90,47 +376,39 @@ class SettingsManager:
     
     def create_directories(self):
         """Create all necessary directories if they don't exist."""
-        # Create standard directories
-        os.makedirs(self.ps3iso_dir, exist_ok=True)
-        os.makedirs(self.psn_pkg_dir, exist_ok=True)
-        os.makedirs(self.psn_rap_dir, exist_ok=True)
-        os.makedirs(self.ps2iso_dir, exist_ok=True)
-        os.makedirs(self.psxiso_dir, exist_ok=True)
-        os.makedirs(self.pspiso_dir, exist_ok=True)
-        os.makedirs(self.processing_dir, exist_ok=True)
-        
-        # Create directories for additional platforms from config
-        if self.config_manager is None:
-            # Only import and create a new ConfigManager if one wasn't provided
-            from core.config_manager import ConfigManager
-            self.config_manager = ConfigManager()
-            
-        for platform_id in self.config_manager.get_platforms().keys():
-            if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
-                # Use the current value from settings if available, else default
-                platform_dir = f'MyrientDownloads/{platform_id.upper()}'
-                dir_path = self.settings.value(f'{platform_id}_dir', platform_dir)
-                setattr(self, f'{platform_id}_dir', dir_path)
-                os.makedirs(dir_path, exist_ok=True)
+        failed_dirs = self.directory_manager.create_all_directories()
+        if failed_dirs:
+            error_msg = "Failed to create the following directories:\n"
+            for directory, error in failed_dirs:
+                error_msg += f"  {directory}: {error}\n"
+            raise Exception(error_msg)
+    
+    def get_platform_directory(self, platform_id):
+        """Get the output directory for a specific platform."""
+        return self.directory_manager.get_platform_directory(platform_id)
+    
+    def validate_and_update_directory(self, directory_type, new_path):
+        """Validate and update a directory path."""
+        return self.directory_manager.update_directory(directory_type, new_path)
     
     def check_ps3dec_binary(self):
         """Check if ps3dec binary exists and is valid."""
         if not os.path.isfile(self.ps3dec_binary):
             self.ps3dec_binary = ''
-            self.settings.setValue('ps3dec_binary', '')
+            self.settings.setValue('binaries/ps3dec_binary', '')
 
         # Check if ps3dec is in PATH
         ps3dec_in_path = shutil.which("ps3dec") or shutil.which("PS3Dec") or shutil.which("ps3dec.exe") or shutil.which("PS3Dec.exe")
         
         if ps3dec_in_path:
             self.ps3dec_binary = ps3dec_in_path
-            self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
+            self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
     
     def check_extractps3iso_binary(self):
         """Check if extractps3iso binary exists and is valid."""
         if not os.path.isfile(self.extractps3iso_binary):
             self.extractps3iso_binary = ''
-            self.settings.setValue('extractps3iso_binary', '')
+            self.settings.setValue('binaries/extractps3iso_binary', '')
         
         # Binary name based on platform
         binary_name = "extractps3iso.exe" if platform.system() == 'Windows' else "extractps3iso"
@@ -140,13 +418,13 @@ class SettingsManager:
         
         if extractps3iso_in_path:
             self.extractps3iso_binary = extractps3iso_in_path
-            self.settings.setValue('extractps3iso_binary', self.extractps3iso_binary)
+            self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
         else:
             # Check if it's in the current directory
             local_binary = os.path.join(os.getcwd(), binary_name)
             if os.path.isfile(local_binary):
                 self.extractps3iso_binary = local_binary
-                self.settings.setValue('extractps3iso_binary', self.extractps3iso_binary)
+                self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
     
     def is_valid_binary(self, path, binary_name):
         """Check if the path points to a valid binary."""
@@ -168,7 +446,7 @@ class SettingsManager:
                     "ps3dec.exe"
                 )
                 self.ps3dec_binary = os.path.join(os.getcwd(), "ps3dec.exe")
-                self.settings.setValue('ps3dec_binary', self.ps3dec_binary)
+                self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
                 print("PS3Dec downloaded successfully")
                 return True
             except Exception as e:
@@ -208,7 +486,7 @@ class SettingsManager:
                 
                 # Update the binary path
                 self.extractps3iso_binary = os.path.join(os.getcwd(), "extractps3iso.exe")
-                self.settings.setValue('extractps3iso_binary', self.extractps3iso_binary)
+                self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
                 
                 print("extractps3iso downloaded and extracted successfully")
                 return True
@@ -225,37 +503,48 @@ class SettingsManager:
         """Update a setting and save it."""
         # Check if this is a checkbox setting
         checkbox_settings = {
-            'decrypt_iso', 'split_large_files', 'keep_encrypted_iso', 
+            'decrypt_iso', 'split_large_files', 'keep_encrypted_iso',
             'keep_dkey_file', 'keep_unsplit_file', 'split_pkg', 'extract_ps3_iso',
-            'keep_decrypted_iso_after_extraction'  # Added new setting
+            'keep_decrypted_iso_after_extraction', 'organize_content_to_folders'
         }
         
         if key in checkbox_settings:
             # Save checkbox settings to the Checkboxes section
             self.settings.setValue(f"Checkboxes/{key}", value)
+        elif key in ['ps3dec_binary', 'extractps3iso_binary']:
+            # Save binary settings to the binaries section
+            self.settings.setValue(f"binaries/{key}", value)
+        elif key.endswith('_dir') or key in ['root_dir', 'processing_dir']:
+            # Save directory settings to the directories section
+            if key == 'myrient_base_dir':
+                key = 'root_dir'  # Normalize legacy key name
+            
+            try:
+                self.validate_and_update_directory(key, value)
+            except ValueError as e:
+                raise ValueError(f"Invalid directory path for {key}: {str(e)}")
         else:
             # Save other settings to the General section
             self.settings.setValue(key, value)
         
-        # Update instance variables
+        # Update instance variables for backwards compatibility
         if key == 'ps3dec_binary':
             self.ps3dec_binary = value
         elif key == 'extractps3iso_binary':
             self.extractps3iso_binary = value
-        elif key == 'ps3iso_dir':
-            self.ps3iso_dir = value
-        elif key == 'psn_pkg_dir':
-            self.psn_pkg_dir = value
-        elif key == 'psn_rap_dir':
-            self.psn_rap_dir = value
-        elif key == 'ps2iso_dir':
-            self.ps2iso_dir = value
-        elif key == 'psxiso_dir':
-            self.psxiso_dir = value
-        elif key == 'pspiso_dir':
-            self.pspiso_dir = value
+        elif key in ['myrient_base_dir', 'root_dir']:
+            old_root = self.myrient_base_dir
+            self.myrient_base_dir = value
+            self.directory_manager.root_dir = value
+            
+            # Update platform directories if they were using default structure
+            self.directory_manager._update_platform_dirs_on_root_change(old_root, value)
+            
+            # Update the exposed properties for backward compatibility
+            self._setup_directory_properties()
         elif key == 'processing_dir':
             self.processing_dir = value
+            self.directory_manager.processing_dir = value
         elif key == 'decrypt_iso':
             self.decrypt_iso = value
         elif key == 'split_large_files':
@@ -272,3 +561,535 @@ class SettingsManager:
             self.extract_ps3_iso = value
         elif key == 'keep_decrypted_iso_after_extraction':
             self.keep_decrypted_iso_after_extraction = value
+        elif key == 'organize_content_to_folders':
+            self.organize_content_to_folders = value
+        elif key.endswith('_dir'):
+            # Handle directory updates through directory manager
+            setattr(self, key, value)
+            if hasattr(self.directory_manager, key):
+                setattr(self.directory_manager, key, value)
+
+
+class SettingsDialog(QDialog):
+    """Dialog for configuring application settings with hierarchical directory management."""
+    
+    def __init__(self, settings_manager, config_manager, parent=None):
+        super(SettingsDialog, self).__init__(parent)
+        self.settings_manager = settings_manager
+        self.config_manager = config_manager
+        self.platforms = config_manager.get_platforms()
+        
+        self.setWindowTitle("Myrient Downloader Settings")
+        self.setMinimumWidth(900)
+        
+        # Dictionary to store all input widgets
+        self.directory_inputs = {}
+        self.binary_inputs = {}
+        
+        self.initUI()
+        
+        # Calculate and set dynamic height after UI is built
+        self._calculate_and_set_dynamic_height()
+    
+    def initUI(self):
+        """Initialize the UI components with tabbed interface."""
+        main_layout = QVBoxLayout(self)
+        
+        # Create tab widget for better organization
+        tab_widget = QTabWidget()
+        
+        # Directory Management Tab
+        directories_tab = self.create_directories_tab()
+        tab_widget.addTab(directories_tab, "Directory Structure")
+        
+        # Binary Tools Tab
+        binaries_tab = self.create_binaries_tab()
+        tab_widget.addTab(binaries_tab, "Binary Tools")
+        
+        main_layout.addWidget(tab_widget)
+        
+        # Create OK and Cancel buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        
+        # Add reset to defaults button
+        reset_button = QPushButton("Reset to Defaults")
+        reset_button.clicked.connect(self.reset_to_defaults)
+        button_layout.addWidget(reset_button)
+        
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.save_settings)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        
+        main_layout.addLayout(button_layout)
+    
+    def create_directories_tab(self):
+        """Create the directories configuration tab."""
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        
+        # Root Configuration Section
+        root_group = QGroupBox("Root Directory Configuration")
+        root_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
+        root_layout = QFormLayout()
+        
+        # Root Directory (MyrientDownloads)
+        self.root_dir_input = QLineEdit(self.settings_manager.myrient_base_dir)
+        root_browse = QPushButton("Browse...")
+        root_browse.clicked.connect(lambda: self.browse_directory(self.root_dir_input))
+        
+        # Connect root directory changes to update platform directories
+        self.root_dir_input.textChanged.connect(self.update_platform_directories_on_root_change)
+        
+        root_dir_layout = QHBoxLayout()
+        root_dir_layout.addWidget(self.root_dir_input)
+        root_dir_layout.addWidget(root_browse)
+        
+        root_layout.addRow("Root Download Directory:", root_dir_layout)
+        self.directory_inputs['root_dir'] = self.root_dir_input
+        
+        # Store original root for change detection
+        self._original_root = self.settings_manager.myrient_base_dir
+        
+        # Processing Directory
+        self.processing_dir_input = QLineEdit(self.settings_manager.processing_dir)
+        processing_browse = QPushButton("Browse...")
+        processing_browse.clicked.connect(lambda: self.browse_directory(self.processing_dir_input))
+        
+        processing_layout = QHBoxLayout()
+        processing_layout.addWidget(self.processing_dir_input)
+        processing_layout.addWidget(processing_browse)
+        
+        root_layout.addRow("Temporary Processing Directory:", processing_layout)
+        self.directory_inputs['processing_dir'] = self.processing_dir_input
+        
+        root_group.setLayout(root_layout)
+        scroll_layout.addWidget(root_group)
+        
+        # PlayStation Console Directories Section
+        playstation_group = QGroupBox("PlayStation Console Directories")
+        playstation_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
+        playstation_layout = QFormLayout()
+        
+        # PlayStation platform directories
+        playstation_configs = [
+            ('ps3iso_dir', 'PlayStation 3 (PS3ISO):', self.settings_manager.ps3iso_dir),
+            ('ps2iso_dir', 'PlayStation 2 (PS2ISO):', self.settings_manager.ps2iso_dir),
+            ('psxiso_dir', 'PlayStation 1/PSX (PSXISO):', self.settings_manager.psxiso_dir),
+            ('pspiso_dir', 'PlayStation Portable (PSPISO):', self.settings_manager.pspiso_dir),
+        ]
+        
+        for attr_name, label, current_value in playstation_configs:
+            line_edit = QLineEdit(current_value)
+            browse_button = QPushButton("Browse...")
+            browse_button.clicked.connect(lambda _, le=line_edit: self.browse_directory(le))
+            
+            dir_layout = QHBoxLayout()
+            dir_layout.addWidget(line_edit)
+            dir_layout.addWidget(browse_button)
+            
+            playstation_layout.addRow(label, dir_layout)
+            self.directory_inputs[attr_name] = line_edit
+        
+        playstation_group.setLayout(playstation_layout)
+        scroll_layout.addWidget(playstation_group)
+        
+        # PlayStation Network Section
+        psn_group = QGroupBox("PlayStation Network (PSN) Content")
+        psn_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
+        psn_layout = QFormLayout()
+        
+        # PSN directories with hierarchical structure
+        psn_configs = [
+            ('psn_pkg_dir', 'PKG Files (packages/):', self.settings_manager.psn_pkg_dir),
+            ('psn_rap_dir', 'RAP Files (exdata/):', self.settings_manager.psn_rap_dir),
+        ]
+        
+        for attr_name, label, current_value in psn_configs:
+            line_edit = QLineEdit(current_value)
+            browse_button = QPushButton("Browse...")
+            browse_button.clicked.connect(lambda _, le=line_edit: self.browse_directory(le))
+            
+            dir_layout = QHBoxLayout()
+            dir_layout.addWidget(line_edit)
+            dir_layout.addWidget(browse_button)
+            
+            psn_layout.addRow(label, dir_layout)
+            self.directory_inputs[attr_name] = line_edit
+        
+        psn_group.setLayout(psn_layout)
+        scroll_layout.addWidget(psn_group)
+        
+        # Other Gaming Systems Section
+        if self.platforms:
+            other_platforms = {k: v for k, v in self.platforms.items()
+                             if k not in ['ps3', 'ps2', 'psx', 'psp', 'psn']}
+            
+            if other_platforms:
+                other_group = QGroupBox("Other Systems")
+                other_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
+                other_layout = QFormLayout()
+                
+                for platform_id, data in other_platforms.items():
+                    attr_name = f"{platform_id.lower()}_dir"
+                    tab_name = data.get('tab_name', platform_id.upper())
+                    current_value = getattr(self.settings_manager, attr_name,
+                                          os.path.join(self.settings_manager.myrient_base_dir, platform_id.upper()))
+                    
+                    line_edit = QLineEdit(current_value)
+                    browse_button = QPushButton("Browse...")
+                    browse_button.clicked.connect(lambda _, le=line_edit: self.browse_directory(le))
+                    
+                    dir_layout = QHBoxLayout()
+                    dir_layout.addWidget(line_edit)
+                    dir_layout.addWidget(browse_button)
+                    
+                    other_layout.addRow(f"{tab_name}:", dir_layout)
+                    self.directory_inputs[attr_name] = line_edit
+                
+                other_group.setLayout(other_layout)
+                scroll_layout.addWidget(other_group)
+        
+        scroll_layout.addStretch(1)
+        scroll_area.setWidget(scroll_content)
+        return scroll_area
+    
+    def create_binaries_tab(self):
+        """Create the binary tools configuration tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Binary Tools Section
+        binaries_group = QGroupBox("Binary Locations")
+        binaries_group.setStyleSheet("QGroupBox { font-weight: bold; padding-top: 15px; margin-top: 5px; }")
+        binaries_layout = QFormLayout()
+        
+        # PS3Dec Binary
+        self.ps3dec_input = QLineEdit(self.settings_manager.ps3dec_binary)
+        ps3dec_browse = QPushButton("Browse...")
+        ps3dec_browse.clicked.connect(lambda: self.browse_executable("PS3 Decrypter", self.ps3dec_input))
+        
+        ps3dec_layout = QHBoxLayout()
+        ps3dec_layout.addWidget(self.ps3dec_input)
+        ps3dec_layout.addWidget(ps3dec_browse)
+        
+        # Only show download button on Windows
+        if platform.system() == 'Windows':
+            ps3dec_download = QPushButton("Download")
+            ps3dec_download.clicked.connect(self.download_ps3dec)
+            ps3dec_layout.addWidget(ps3dec_download)
+        
+        binaries_layout.addRow("PS3Dec Binary:", ps3dec_layout)
+        self.binary_inputs['ps3dec_binary'] = self.ps3dec_input
+        
+        # extractps3iso Binary
+        self.extractps3iso_input = QLineEdit(self.settings_manager.extractps3iso_binary)
+        extractps3iso_browse = QPushButton("Browse...")
+        extractps3iso_browse.clicked.connect(lambda: self.browse_executable("PS3 ISO Extractor", self.extractps3iso_input))
+        
+        extractps3iso_layout = QHBoxLayout()
+        extractps3iso_layout.addWidget(self.extractps3iso_input)
+        extractps3iso_layout.addWidget(extractps3iso_browse)
+        
+        # Only show download button on Windows
+        if platform.system() == 'Windows':
+            extractps3iso_download = QPushButton("Download")
+            extractps3iso_download.clicked.connect(self.download_extractps3iso)
+            extractps3iso_layout.addWidget(extractps3iso_download)
+        
+        binaries_layout.addRow("extractps3iso Binary:", extractps3iso_layout)
+        self.binary_inputs['extractps3iso_binary'] = self.extractps3iso_input
+        
+        binaries_group.setLayout(binaries_layout)
+        layout.addWidget(binaries_group)
+        
+        # Binary explanation
+        binary_explanation = QLabel(
+            "Binary Tools Info:\n"
+            "• PS3Dec: Required for decrypting PlayStation 3 ISO files\n"
+            "• extractps3iso: Required for extracting PlayStation 3 ISO contents\n"
+            "• Windows: Use the Download buttons to automatically download these tools\n"
+            "• Arch Linux: Install ps3iso-utils-git and ps3dec-git from the AUR\n"
+            "• These tools will be automatically detected if installed in your system PATH\n"
+            "• You can also manually specify their locations using the Browse buttons"
+        )
+        binary_explanation.setWordWrap(True)
+        binary_explanation.setStyleSheet(get_explanation_style())
+        layout.addWidget(binary_explanation)
+        
+        layout.addStretch(1)
+        return widget
+    
+    def _calculate_and_set_dynamic_height(self):
+        """Calculate and set the dialog height based on the number of settings."""
+        # Count the number of settings/groups that will be displayed
+        base_height = 200  # Base height for window chrome, buttons, tabs, etc.
+        
+        # Root configuration section (2 items)
+        settings_count = 2
+        
+        # PlayStation console directories (4 items)
+        settings_count += 4
+        
+        # PlayStation Network directories (2 items)
+        settings_count += 2
+        
+        # Count other gaming systems
+        if self.platforms:
+            other_platforms = {k: v for k, v in self.platforms.items()
+                             if k not in ['ps3', 'ps2', 'psx', 'psp', 'psn']}
+            settings_count += len(other_platforms)
+        
+        # Binary tools (2 items)
+        settings_count += 2
+        
+        # Calculate height based on number of settings
+        # Each setting row is approximately 40-50 pixels high
+        item_height = 45
+        group_header_height = 35  # Height for group box headers
+        group_padding = 20  # Padding within groups
+        
+        # Calculate total content height
+        num_groups = 4  # Root, PlayStation, PSN, Binary Tools
+        if self.platforms and any(k not in ['ps3', 'ps2', 'psx', 'psp', 'psn'] for k in self.platforms.keys()):
+            num_groups += 1  # Other gaming systems group exists
+        
+        content_height = (settings_count * item_height) + (num_groups * group_header_height) + (num_groups * group_padding)
+        
+        # Add base height and some buffer
+        total_height = base_height + content_height + 100  # 100px buffer
+        
+        # Set reasonable bounds
+        min_height = 600
+        max_height = 1000
+        
+        calculated_height = max(min_height, min(max_height, total_height))
+        
+        # Set the calculated height
+        self.setMinimumHeight(calculated_height)
+        self.resize(1000, calculated_height)
+    
+    def update_platform_directories_on_root_change(self):
+        """Update platform directories when root directory changes."""
+        new_root = self.root_dir_input.text().strip()
+        if not new_root:
+            return
+        
+        # Store the original root to detect changes
+        original_root = getattr(self, '_original_root', self.settings_manager.myrient_base_dir)
+        
+        # Only update if the root actually changed
+        if new_root == original_root:
+            return
+        
+        # Check if platform directories are using default structure relative to old root
+        platform_updates = {}
+        
+        # PlayStation directories
+        platform_configs = {
+            'ps3iso_dir': 'PS3ISO',
+            'ps2iso_dir': 'PS2ISO',
+            'psxiso_dir': 'PSXISO',
+            'pspiso_dir': 'PSPISO',
+            'psn_pkg_dir': os.path.join('PSN', 'packages'),
+            'psn_rap_dir': os.path.join('PSN', 'exdata')
+        }
+        
+        # Add dynamic platform directories
+        for platform_id in self.platforms:
+            if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                attr_name = f"{platform_id.lower()}_dir"
+                platform_configs[attr_name] = platform_id.upper()
+        
+        # Check each platform directory
+        for attr_name, subdir in platform_configs.items():
+            if attr_name in self.directory_inputs:
+                current_path = self.directory_inputs[attr_name].text().strip()
+                expected_old_path = os.path.join(original_root, subdir)
+                
+                # If the current path matches the old default structure, update it
+                if current_path == expected_old_path or current_path == os.path.normpath(expected_old_path):
+                    new_path = os.path.join(new_root, subdir)
+                    platform_updates[attr_name] = new_path
+        
+        # Apply updates
+        for attr_name, new_path in platform_updates.items():
+            self.directory_inputs[attr_name].setText(new_path)
+        
+        # Update the stored original root
+        self._original_root = new_root
+    
+    def reset_to_defaults(self):
+        """Reset all settings to their default values."""
+        reply = QMessageBox.question(
+            self,
+            "Reset to Defaults",
+            "Are you sure you want to reset all directory and binary settings to their default values?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Reset directory inputs to defaults
+            default_root = 'MyrientDownloads'
+            self.root_dir_input.setText(default_root)
+            self.processing_dir_input.setText('processing')
+            
+            # Reset PlayStation directories
+            self.directory_inputs['ps3iso_dir'].setText(os.path.join(default_root, 'PS3ISO'))
+            self.directory_inputs['ps2iso_dir'].setText(os.path.join(default_root, 'PS2ISO'))
+            self.directory_inputs['psxiso_dir'].setText(os.path.join(default_root, 'PSXISO'))
+            self.directory_inputs['pspiso_dir'].setText(os.path.join(default_root, 'PSPISO'))
+            
+            # Reset PSN directories
+            self.directory_inputs['psn_pkg_dir'].setText(os.path.join(default_root, 'PSN', 'packages'))
+            self.directory_inputs['psn_rap_dir'].setText(os.path.join(default_root, 'PSN', 'exdata'))
+            
+            # Reset other platform directories
+            for platform_id in self.platforms:
+                if platform_id not in ['ps3', 'ps2', 'psx', 'psp', 'psn']:
+                    attr_name = f"{platform_id.lower()}_dir"
+                    if attr_name in self.directory_inputs:
+                        self.directory_inputs[attr_name].setText(os.path.join(default_root, platform_id.upper()))
+            
+            # Reset binary inputs
+            self.ps3dec_input.setText('')
+            self.extractps3iso_input.setText('')
+            
+            # Update the original root reference
+            self._original_root = default_root
+    
+    def browse_directory(self, line_edit):
+        """Open directory browser dialog and update line edit"""
+        current_dir = line_edit.text() or os.path.expanduser("~")
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select Directory", current_dir, QFileDialog.ShowDirsOnly
+        )
+        if directory:
+            line_edit.setText(directory)
+    
+    def browse_executable(self, title, line_edit):
+        """Open file browser dialog for executables and update line edit"""
+        current_path = line_edit.text() or os.path.expanduser("~")
+        file_filter = "All Files (*)" if os.name == 'posix' else "Executables (*.exe);;All Files (*)"
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, f"Select {title}",
+            os.path.dirname(current_path) if current_path else os.path.expanduser("~"),
+            file_filter
+        )
+        
+        if file_path:
+            line_edit.setText(file_path)
+    
+    def download_ps3dec(self):
+        """Download PS3Dec binary and update the input field."""
+        try:
+            if self.settings_manager.download_ps3dec():
+                self.ps3dec_input.setText(self.settings_manager.ps3dec_binary)
+                QMessageBox.information(
+                    self,
+                    "Download Successful",
+                    "PS3Dec has been downloaded successfully!"
+                )
+            else:
+                if platform.system() == 'Windows':
+                    QMessageBox.warning(
+                        self,
+                        "Download Failed",
+                        "Failed to download PS3Dec. Please check your internet connection and try again."
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Manual Installation Required",
+                        "On Linux/macOS, please install ps3dec manually from your package manager or compile from source."
+                    )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Download Error",
+                f"An error occurred while downloading PS3Dec:\n{str(e)}"
+            )
+    
+    def download_extractps3iso(self):
+        """Download extractps3iso binary and update the input field."""
+        try:
+            if self.settings_manager.download_extractps3iso():
+                self.extractps3iso_input.setText(self.settings_manager.extractps3iso_binary)
+                QMessageBox.information(
+                    self,
+                    "Download Successful",
+                    "extractps3iso has been downloaded successfully!"
+                )
+            else:
+                if platform.system() == 'Windows':
+                    QMessageBox.warning(
+                        self,
+                        "Download Failed",
+                        "Failed to download extractps3iso. Please check your internet connection and try again."
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Manual Installation Required",
+                        "On Linux/macOS, please install extractps3iso manually from your package manager or compile from source."
+                    )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Download Error",
+                f"An error occurred while downloading extractps3iso:\n{str(e)}"
+            )
+    
+    def save_settings(self):
+        """Save all settings and close dialog"""
+        try:
+            # Validate and save all directory settings
+            error_messages = []
+            
+            # Save root and processing directories first
+            for key, input_widget in self.directory_inputs.items():
+                directory = input_widget.text().strip()
+                if directory:
+                    try:
+                        if key == 'root_dir':
+                            self.settings_manager.update_setting('myrient_base_dir', directory)
+                        else:
+                            self.settings_manager.update_setting(key, directory)
+                    except ValueError as e:
+                        error_messages.append(f"{key}: {str(e)}")
+            
+            # Save binary settings
+            for key, input_widget in self.binary_inputs.items():
+                binary_path = input_widget.text().strip()
+                self.settings_manager.update_setting(key, binary_path)
+            
+            # Show errors if any occurred
+            if error_messages:
+                QMessageBox.warning(
+                    self,
+                    "Directory Validation Errors",
+                    "The following directory paths are invalid:\n\n" + "\n".join(error_messages)
+                )
+                return
+            
+            # Update directories on disk
+            self.settings_manager.create_directories()
+            
+            # Accept and close the dialog
+            self.accept()
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Saving Settings",
+                f"An error occurred while saving settings:\n{str(e)}"
+            )

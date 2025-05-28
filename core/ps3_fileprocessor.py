@@ -6,10 +6,19 @@ import sys
 import tempfile
 from PyQt5.QtCore import QEventLoop
 from threads.processing_threads import CommandRunner, SplitPkgThread
-from core.file_processor_base import FileProcessorBase
-
-class PS3FileProcessor(FileProcessorBase):
+class PS3FileProcessor:
     """Handles PS3-specific file processing operations like decrypting ISOs and splitting PKGs."""
+    
+    def __init__(self, settings_manager, output_window, parent=None):
+        """Initialize PS3FileProcessor with required dependencies."""
+        self.settings_manager = settings_manager
+        self.output_window = output_window
+        self.parent = parent
+        self.progress_callback = None
+        
+    def set_progress_callback(self, callback):
+        """Set a callback function for progress updates."""
+        self.progress_callback = callback
     
     def decrypt_iso(self, iso_path, key):
         """Decrypt a PS3 ISO file using ps3dec."""
@@ -31,9 +40,13 @@ class PS3FileProcessor(FileProcessorBase):
         # Create and start the command runner
         runner = CommandRunner(command)
         
-        # Connect the output signal to print so we can see ps3dec output
-        runner.output_signal.connect(lambda text: print(text))
-        runner.error_signal.connect(lambda text: print(f"ERROR: {text}"))
+        # Connect the output signal to output_window for proper formatting
+        runner.output_signal.connect(lambda text: self.output_window.append(text))
+        runner.error_signal.connect(lambda text: self.output_window.append(f"ERROR: {text}"))
+        
+        # Connect progress if callback is available
+        if self.progress_callback:
+            runner.output_signal.connect(self._parse_progress_from_output)
         
         # Create an event loop to wait for the command to complete
         loop = QEventLoop()
@@ -53,7 +66,7 @@ class PS3FileProcessor(FileProcessorBase):
                 dec_path = f"{iso_path}.dec"
                 
             if not os.path.exists(dec_path):
-                print(f"Warning: Decryption may have failed, decrypted file not found at {dec_path}")
+                self.output_window.append(f"Warning: Decryption may have failed, decrypted file not found at {dec_path}")
                 return iso_path
             
             # Rename the original ISO file to .iso.enc
@@ -65,18 +78,20 @@ class PS3FileProcessor(FileProcessorBase):
             
             return enc_path
         except Exception as e:
-            print(f"Error in decrypt_iso: {str(e)}")
+            self.output_window.append(f"Error in decrypt_iso: {str(e)}")
             # If there's an error, return the original path so downstream code has something to work with
             return iso_path
     
     def split_pkg(self, pkg_path):
         """Split a PS3 PKG file for FAT32 filesystems."""
         if os.path.getsize(pkg_path) < 4294967295:
-            print(f"File {pkg_path} is smaller than 4GB. Skipping split.")
+            self.output_window.append(f"File {pkg_path} is smaller than 4GB. Skipping split.")
             return False
             
         split_pkg_thread = SplitPkgThread(pkg_path)
-        split_pkg_thread.progress.connect(self.print_progress)
+        split_pkg_thread.progress.connect(self._print_progress)
+        if self.progress_callback:
+            split_pkg_thread.progress.connect(lambda text: self._parse_split_progress(text))
         split_pkg_thread.start()
         split_pkg_thread.wait()
         
@@ -97,34 +112,66 @@ class PS3FileProcessor(FileProcessorBase):
             extract_tool = shutil.which('extractps3iso')
             
             if not extract_tool:
-                print("extractps3iso tool not found. Please install it.")
+                self.output_window.append("extractps3iso tool not found. Please install it.")
                 return (False, expected_extraction_dir)
-            
-            print(f"Extracting PS3 ISO using extractps3iso: {iso_path}")
+
+            self.output_window.append(f"Extracting PS3 ISO using extractps3iso: {iso_path}")
             
             # Run the extractps3iso command - extract to parent directory
             # Let extractps3iso create the folder structure naturally
             cmd = [extract_tool, iso_path, parent_dir]
-            process = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False
-            )
+            
+            if self.progress_callback:
+                # Start extraction with progress tracking
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                
+                # Monitor output for progress
+                output_lines = []
+                while True:
+                    output = process.stdout.readline()
+                    if output == '' and process.poll() is not None:
+                        break
+                    if output:
+                        output_lines.append(output.strip())
+                        self._parse_extraction_progress(output.strip())
+                
+                # Get any remaining output
+                stdout, stderr = process.communicate()
+                if stdout:
+                    output_lines.extend(stdout.strip().split('\n'))
+                    
+                # Combine all output
+                process.stdout = '\n'.join(output_lines)
+                process.stderr = stderr
+                process.returncode = process.poll()
+            else:
+                process = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False
+                )
             
             # Check if the extraction was successful
             if process.returncode != 0:
-                print(f"extractps3iso failed with return code {process.returncode}:")
-                print(process.stderr)
+                self.output_window.append(f"extractps3iso failed with return code {process.returncode}:")
+                self.output_window.append(process.stderr)
                 return (False, expected_extraction_dir)
-            
+
             # Log the output
-            print(process.stdout)
+            self.output_window.append(process.stdout)
             
             # Check if extraction actually produced files in the expected directory
             if os.path.exists(expected_extraction_dir) and any(os.scandir(expected_extraction_dir)):
-                print(f"Successfully extracted PS3 ISO to {expected_extraction_dir}")
+                self.output_window.append(f"Successfully extracted PS3 ISO to {expected_extraction_dir}")
                 return (True, expected_extraction_dir)
             else:
                 # Look for any directory that was created by extractps3iso
@@ -134,14 +181,14 @@ class PS3FileProcessor(FileProcessorBase):
                 
                 if potential_dirs:
                     actual_dir = os.path.join(parent_dir, potential_dirs[0])
-                    print(f"Found extraction at {actual_dir}")
+                    self.output_window.append(f"Found extraction at {actual_dir}")
                     return (True, actual_dir)
-                
-                print("extractps3iso didn't extract any files.")
+
+                self.output_window.append("extractps3iso didn't extract any files.")
                 return (False, expected_extraction_dir)
                 
         except Exception as e:
-            print(f"Error extracting ISO: {str(e)}")
+            self.output_window.append(f"Error extracting ISO: {str(e)}")
             return (False, expected_extraction_dir)
     
     def _format_size(self, size_bytes):
@@ -170,3 +217,114 @@ class PS3FileProcessor(FileProcessorBase):
                     return data.decode('utf-8', errors='replace')
         else:
             return str(data)
+    
+    def _print_progress(self, text):
+        """Print progress updates."""
+        self.output_window.append(text)
+    
+    def _parse_progress_from_output(self, text):
+        """Parse progress information from ps3dec output."""
+        if self.progress_callback:
+            # ps3dec typically shows progress as percentages
+            # Look for patterns like "Progress: 50%" or similar
+            import re
+            
+            # Common progress patterns in ps3dec output
+            progress_patterns = [
+                r'(\d+)%',
+                r'Progress:\s*(\d+)%',
+                r'(\d+)/(\d+)',
+                r'Decrypting.*?(\d+)%'
+            ]
+            
+            for pattern in progress_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    try:
+                        if len(match.groups()) == 1:
+                            # Simple percentage
+                            progress = int(match.group(1))
+                            if 0 <= progress <= 100:
+                                self.progress_callback(progress)
+                                break
+                        elif len(match.groups()) == 2:
+                            # Fraction format like "50/100"
+                            current = int(match.group(1))
+                            total = int(match.group(2))
+                            if total > 0:
+                                progress = int((current / total) * 100)
+                                if 0 <= progress <= 100:
+                                    self.progress_callback(progress)
+                                    break
+                    except (ValueError, ZeroDivisionError):
+                        continue
+    
+    def _parse_split_progress(self, text):
+        """Parse progress information from split operations."""
+        if self.progress_callback:
+            import re
+            
+            # Look for split progress patterns like "Splitting file: part 1/5 complete"
+            progress_patterns = [
+                r'part\s+(\d+)/(\d+)\s+complete',
+                r'(\d+)/(\d+)\s+complete',
+                r'Splitting.*?(\d+)%'
+            ]
+            
+            for pattern in progress_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    try:
+                        if len(match.groups()) == 2:
+                            # Fraction format like "part 1/5"
+                            current = int(match.group(1))
+                            total = int(match.group(2))
+                            if total > 0:
+                                progress = int((current / total) * 100)
+                                if 0 <= progress <= 100:
+                                    self.progress_callback(progress)
+                                    break
+                        elif len(match.groups()) == 1:
+                            # Simple percentage
+                            progress = int(match.group(1))
+                            if 0 <= progress <= 100:
+                                self.progress_callback(progress)
+                                break
+                    except (ValueError, ZeroDivisionError):
+                        continue
+   
+    def _parse_extraction_progress(self, text):
+        """Parse progress information from extractps3iso output."""
+        if self.progress_callback:
+            import re
+            
+            # Look for extraction progress patterns
+            # extractps3iso might show file counts or percentages
+            progress_patterns = [
+                r'(\d+)%',
+                r'(\d+)/(\d+)\s+files',
+                r'Extracting.*?(\d+)%',
+                r'(\d+)\s+of\s+(\d+)'
+            ]
+            
+            for pattern in progress_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    try:
+                        if len(match.groups()) == 1:
+                            # Simple percentage
+                            progress = int(match.group(1))
+                            if 0 <= progress <= 100:
+                                self.progress_callback(progress)
+                                break
+                        elif len(match.groups()) == 2:
+                            # Fraction format
+                            current = int(match.group(1))
+                            total = int(match.group(2))
+                            if total > 0:
+                                progress = int((current / total) * 100)
+                                if 0 <= progress <= 100:
+                                    self.progress_callback(progress)
+                                    break
+                    except (ValueError, ZeroDivisionError):
+                        continue
