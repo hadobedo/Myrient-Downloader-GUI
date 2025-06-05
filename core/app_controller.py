@@ -1,5 +1,6 @@
 import os
 import re
+from typing import List
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtGui import QColor, QBrush
@@ -131,6 +132,10 @@ class AppController(QObject):
             # Fresh start
             self.processed_items = 0
             self.total_items = queue_list_widget.count()
+            
+            # Reset overwrite choices for new download session
+            self.download_manager.reset_overwrite_choices()
+            self.processing_manager.reset_overwrite_choices()
         
         # Process queue until empty
         while queue_list_widget.count() > 0 and not self.is_paused:
@@ -443,6 +448,53 @@ class AppController(QObject):
         
         self.operation_complete.emit()
     
+    def filter_by_regions(self, items: List[str], selected_regions: List[str]) -> List[str]:
+        """Filter items by multiple regions."""
+        def get_regions(item: str) -> List[str]:
+            # Extract all region and language information from filename
+            regions = []
+            # Match all parenthetical content
+            matches = re.finditer(r'\((.*?)\)', item)
+            
+            for match in matches:
+                content = match.group(1)
+                # Split by commas and spaces to get individual parts
+                parts = re.split(r'[,\s]+', content)
+                
+                # Check each part for region or language code
+                for part in parts:
+                    # Common region names
+                    if part in ["USA", "Europe", "Japan", "Australia", "Canada", "Korea",
+                              "Spain", "Germany", "France", "Italy"]:
+                        regions.append(part)
+                    # Language codes that might indicate region
+                    elif part == "En":
+                        if "USA" not in regions and "Europe" not in regions:
+                            regions.append("USA")
+                    elif part == "Fr":
+                        if "France" not in regions:
+                            regions.append("France")
+                    elif part == "De":
+                        if "Germany" not in regions:
+                            regions.append("Germany")
+                    elif part == "Es":
+                        if "Spain" not in regions:
+                            regions.append("Spain")
+                    elif part == "It":
+                        if "Italy" not in regions:
+                            regions.append("Italy")
+            
+            return regions
+
+        filtered_items = []
+        for item in items:
+            item_regions = get_regions(item)
+            # If any of the selected regions match this item's regions, include it
+            if any(region in item_regions for region in selected_regions):
+                filtered_items.append(item)
+                
+        return filtered_items
+
     def _format_file_size(self, size_bytes):
         """Format file size for display."""
         if size_bytes < 1024:

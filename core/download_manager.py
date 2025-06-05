@@ -4,6 +4,7 @@ import urllib.parse
 from PyQt5.QtCore import QObject, pyqtSignal, QEventLoop
 
 from threads.download_threads import DownloadThread
+from gui.overwrite_dialog import OverwriteManager
 
 
 class DownloadManager(QObject):
@@ -27,6 +28,7 @@ class DownloadManager(QObject):
         self.current_operation = None
         self.current_file_path = None
         self.is_paused = False
+        self.overwrite_manager = OverwriteManager()
         
     @staticmethod
     def check_file_exists(url, local_path):
@@ -185,35 +187,72 @@ class DownloadManager(QObject):
         potential_final_filename_pkg = base_name_no_ext + '.pkg'
         potential_final_dirname_extracted_ps3 = base_name_no_ext
 
+        # Check for existing files and handle conflicts
+        existing_files = []
+        
         if platform_id == 'ps3':
             # PS3 can result in an ISO or an extracted folder. Check both.
             final_iso_path = os.path.join(final_output_dir, potential_final_filename_iso)
             final_extracted_folder_path = os.path.join(final_output_dir, potential_final_dirname_extracted_ps3)
+            
             if os.path.exists(final_iso_path):
-                self.output_window.append(f"({queue_position}) Final output file {final_iso_path} already exists. Skipping.")
-                return final_iso_path
+                existing_files.append({
+                    'path': final_iso_path,
+                    'existing_size': os.path.getsize(final_iso_path),
+                    'new_size': 0  # Unknown until download
+                })
             if os.path.exists(final_extracted_folder_path) and os.path.isdir(final_extracted_folder_path):
-                self.output_window.append(f"({queue_position}) Final output folder {final_extracted_folder_path} already exists. Skipping.")
-                return final_extracted_folder_path
+                existing_files.append({
+                    'path': final_extracted_folder_path,
+                    'existing_size': self._get_directory_size(final_extracted_folder_path),
+                    'new_size': 0  # Unknown until processing
+                })
+                
         elif platform_id == 'psn':
             # PSN games are primarily PKGs. RAPs are separate.
             final_pkg_path = os.path.join(final_output_dir, potential_final_filename_pkg)
             if os.path.exists(final_pkg_path):
-                self.output_window.append(f"({queue_position}) Final output file {final_pkg_path} already exists. Skipping.")
-                return final_pkg_path
+                existing_files.append({
+                    'path': final_pkg_path,
+                    'existing_size': os.path.getsize(final_pkg_path),
+                    'new_size': 0  # Unknown until download
+                })
         else:
             # Generic handler for other platforms using the new directory management
             final_iso_path = os.path.join(final_output_dir, potential_final_filename_iso)
             if os.path.exists(final_iso_path):
-                 self.output_window.append(f"({queue_position}) Final output file {final_iso_path} already exists. Skipping.")
-                 return final_iso_path
+                existing_files.append({
+                    'path': final_iso_path,
+                    'existing_size': os.path.getsize(final_iso_path),
+                    'new_size': 0  # Unknown until download
+                })
+            
             # Add checks for other common extensions if necessary, e.g., .bin for PSX/PS2
             if platform_id in ['psx', 'ps2']:
                 potential_final_filename_bin = base_name_no_ext + '.bin'
                 final_bin_path = os.path.join(final_output_dir, potential_final_filename_bin)
                 if os.path.exists(final_bin_path):
-                    self.output_window.append(f"({queue_position}) Final output file {final_bin_path} already exists. Skipping.")
-                    return final_bin_path
+                    existing_files.append({
+                        'path': final_bin_path,
+                        'existing_size': os.path.getsize(final_bin_path),
+                        'new_size': 0  # Unknown until download
+                    })
+        
+        # Handle conflicts if any exist
+        if existing_files:
+            from gui.overwrite_dialog import OverwriteDialog
+            choice, apply_to_all = self.overwrite_manager.handle_conflict(
+                existing_files, "downloading", self.parent()
+            )
+            
+            if choice == OverwriteDialog.CANCEL:
+                self.output_window.append(f"({queue_position}) Download cancelled due to existing files.")
+                return None
+            elif choice == OverwriteDialog.SKIP:
+                self.output_window.append(f"({queue_position}) Skipping download - files already exist.")
+                # Return the first existing file as the "downloaded" result
+                return existing_files[0]['path']
+            # If OVERWRITE or RENAME, continue with download (files will be handled during processing)
 
         # If no existing final file was found, proceed to download the .zip into processing_dir
         zip_file_path = os.path.join(self.settings_manager.processing_dir, selected_iso_filename)
@@ -289,3 +328,22 @@ class DownloadManager(QObject):
         """Clear current operation state."""
         self.current_operation = None
         self.current_file_path = None
+    
+    def reset_overwrite_choices(self):
+        """Reset overwrite manager choices for new download session."""
+        self.overwrite_manager.reset()
+    
+    def _get_directory_size(self, directory_path):
+        """Calculate the total size of a directory and its contents."""
+        total_size = 0
+        try:
+            for dirpath, dirnames, filenames in os.walk(directory_path):
+                for filename in filenames:
+                    file_path = os.path.join(dirpath, filename)
+                    try:
+                        total_size += os.path.getsize(file_path)
+                    except (OSError, IOError):
+                        pass  # Skip files that can't be accessed
+        except (OSError, IOError):
+            pass  # Skip directories that can't be accessed
+        return total_size

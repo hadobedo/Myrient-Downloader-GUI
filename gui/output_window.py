@@ -63,6 +63,18 @@ class OutputWindow(QTextEdit):
         self.scrollTimer.setSingleShot(True)
         self.scrollTimer.timeout.connect(self.forceScrollToBottom)
         
+        # Set styling that respects the application theme
+        self.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                background-color: palette(base);
+                color: palette(text);
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 9pt;
+            }
+        """)
+        
     def set_as_stdout(self):
         """Set this OutputWindow as the system's stdout."""
         sys.stdout = self.redirector

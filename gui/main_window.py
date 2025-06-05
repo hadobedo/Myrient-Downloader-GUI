@@ -6,9 +6,10 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLineEdit, QListWidget, QLabel, QCheckBox,
     QFileDialog, QDialog, QGroupBox, QProgressBar, QTabWidget, QAbstractItemView,
-    QMessageBox, QListWidgetItem, QFormLayout, QDialogButtonBox, QGridLayout
+    QMessageBox, QListWidgetItem, QFormLayout, QDialogButtonBox, QGridLayout,
+    QSplitter, QFrame, QSizePolicy, QComboBox
 )
-from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop
+from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop # Removed QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QFont, QBrush, QColor
 
 from gui.output_window import OutputWindow
@@ -23,6 +24,10 @@ class GUIDownloader(QWidget):
     def __init__(self):
         super().__init__()
         
+        # Removed animation-related attributes
+        # self.output_animation = None
+        # self.is_output_visible = False
+
         # Create output window first to capture all output
         self.output_window = OutputWindow(self)
         self.output_window.set_as_stdout()  # Redirect stdout early in initialization
@@ -129,20 +134,79 @@ class GUIDownloader(QWidget):
 
     def initUI(self):
         """Initialize the user interface."""
-        vbox = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(3)  # Further reduce spacing between elements
+        main_layout.setContentsMargins(8, 8, 8, 8)  # Reduce window margins
 
-        # Add a header for the software list
-        iso_list_header = QLabel('Software')
-        vbox.addWidget(iso_list_header)
-
-        # Create a search box
-        self.search_box = QLineEdit(self)
+        # ============ TOP SECTION: Software List and Queue Side-by-Side ============
+        top_splitter = QSplitter(Qt.Horizontal)
+        
+        # Left side: Software List
+        software_widget = QWidget()
+        software_layout = QVBoxLayout(software_widget)
+        software_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Software header and search
+        software_header = QLabel('Software')
+        software_header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        software_layout.addWidget(software_header)
+        
+        # Search and filter container
+        search_filter_layout = QVBoxLayout()
+        
+        # Search bar and filters button in horizontal layout
+        search_bar_layout = QHBoxLayout()
+        
+        # Search box
+        self.search_box = QLineEdit()
         self.search_box.setPlaceholderText('Search...')
         self.search_box.textChanged.connect(self.update_results)
-        vbox.addWidget(self.search_box)
-
-        # Create a list for results (software list)
-        self.result_list = QTabWidget(self)
+        search_bar_layout.addWidget(self.search_box)
+        
+        # Filters button
+        self.filters_button = QPushButton('Filters')
+        self.filters_button.setCheckable(True)
+        self.filters_button.clicked.connect(self.toggle_region_filter)
+        search_bar_layout.addWidget(self.filters_button)
+        
+        search_filter_layout.addLayout(search_bar_layout)
+        
+        # Region filter group (initially hidden)
+        region_group = QGroupBox("Filter by Region")
+        region_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; }")
+        region_group.setVisible(False)
+        self.region_filter_group = region_group  # Store reference for toggling
+        region_layout = QGridLayout()
+        
+        # Create region checkboxes
+        self.region_checkboxes = {}
+        regions = [
+            "USA", "Canada", "Europe", "Japan", "Australia",
+            "Korea", "Spain", "Germany", "France", "Italy",
+            "World",  # For multi-language/region releases
+            "Other"  # For games that don't match other regions
+        ]
+        
+        row = 0
+        col = 0
+        for region in regions:
+            checkbox = QCheckBox(region)
+            checkbox.stateChanged.connect(self.update_results)
+            region_layout.addWidget(checkbox, row, col)
+            self.region_checkboxes[region] = checkbox
+            
+            col += 1
+            if col > 2:  # 3 checkboxes per row
+                col = 0
+                row += 1
+        
+        region_group.setLayout(region_layout)
+        search_filter_layout.addWidget(region_group)
+        
+        software_layout.addLayout(search_filter_layout)
+        
+        # Create result list (software tabs)
+        self.result_list = QTabWidget()
         
         # Create tabs based on the platforms configuration
         for platform_id, data in self.platforms.items():
@@ -153,140 +217,340 @@ class GUIDownloader(QWidget):
             self.result_list.addTab(list_widget, data['tab_name'])
         
         self.result_list.currentChanged.connect(self.update_add_to_queue_button)
-        # Connect tab change to update checkboxes visibility
         self.result_list.currentChanged.connect(self.update_checkboxes_for_platform)
-        vbox.addWidget(self.result_list)
+        software_layout.addWidget(self.result_list)
 
-        # Connect the itemSelectionChanged signal to the update_add_to_queue_button method
+        # Connect the itemSelectionChanged signals
         for i in range(self.result_list.count()):
             self.result_list.widget(i).itemSelectionChanged.connect(self.update_add_to_queue_button)
-
-        # Allow selecting multiple items
-        for i in range(self.result_list.count()):
             self.result_list.widget(i).setSelectionMode(QAbstractItemView.ExtendedSelection)
 
-        # Create a horizontal box layout
-        hbox = QHBoxLayout()
-
-        # Create a button to add to queue
-        self.add_to_queue_button = QPushButton('Add to Queue', self)
+        # Add to queue button
+        self.add_to_queue_button = QPushButton('Add to Queue')
         self.add_to_queue_button.clicked.connect(self.add_to_queue)
-        self.add_to_queue_button.setEnabled(False)  # Disable button initially
-        hbox.addWidget(self.add_to_queue_button)
-
-        # Create a button to remove from queue
-        self.remove_from_queue_button = QPushButton('Remove from Queue', self)
-        self.remove_from_queue_button.clicked.connect(self.remove_from_queue)
-        self.remove_from_queue_button.setEnabled(False)  # Disable button initially
-        hbox.addWidget(self.remove_from_queue_button)
-
-        # Add the horizontal box layout to the vertical box layout
-        vbox.addLayout(hbox)
-
-        # Add a header for the Queue
-        queue_header = QLabel('Queue')
-        vbox.addWidget(queue_header)
-
-        # Create queue list with visual formatting instead of HTML
-        self.queue_list = QListWidget(self)
+        self.add_to_queue_button.setEnabled(False)
+        software_layout.addWidget(self.add_to_queue_button)
+        
+        # Right side: Queue
+        queue_widget = QWidget()
+        queue_layout = QVBoxLayout(queue_widget)
+        queue_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Queue header
+        queue_header = QLabel('Download Queue')
+        queue_header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        queue_layout.addWidget(queue_header)
+        
+        # Queue list
+        self.queue_list = QListWidget()
         self.queue_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button)
         self.queue_list.setWordWrap(True)
-        
-        # Set a minimum height for the queue list and make it resize properly
         self.queue_list.setMinimumHeight(150)
-        # Enable horizontal scrollbar when needed for long lines
         self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # Set the resize mode to fit contents
         self.queue_list.setResizeMode(QListWidget.Adjust)
+        queue_layout.addWidget(self.queue_list)
         
-        vbox.addWidget(self.queue_list)
+        # Remove from queue button
+        self.remove_from_queue_button = QPushButton('Remove from Queue')
+        self.remove_from_queue_button.clicked.connect(self.remove_from_queue)
+        self.remove_from_queue_button.setEnabled(False)
+        queue_layout.addWidget(self.remove_from_queue_button)
+        
+        # Add both widgets to the splitter
+        top_splitter.addWidget(software_widget)
+        top_splitter.addWidget(queue_widget)
+        # top_splitter.setSizes([600, 600])  # Removed for auto-sizing
+        
+        main_layout.addWidget(top_splitter)
 
-        # Create a grid layout for the options
-        options_layout = QVBoxLayout()
+        # ============ MIDDLE SECTION: Settings Side-by-Side ============
+        settings_splitter = QSplitter(Qt.Horizontal)
+        
+        # Create general and platform-specific options side by side
+        general_options_widget, platform_options_widget = self.create_options_side_by_side()
+        
+        settings_splitter.addWidget(general_options_widget)
+        settings_splitter.addWidget(platform_options_widget)
+        
+        # Make the settings_splitter handle non-movable by the user
+        settings_splitter_handle = settings_splitter.handle(1)
+        if settings_splitter_handle:
+            settings_splitter_handle.setDisabled(True)
+        # Set initial equal sizes for the settings_splitter
+        settings_splitter.setSizes([350, 350]) # Adjust if necessary
 
-        # Add headers and options
-        self.create_options_grid(options_layout)
+        main_layout.addWidget(settings_splitter)
 
-        # Create a group box to contain the options layout
-        group_box = QGroupBox()
-        group_box.setLayout(options_layout)
-        vbox.addWidget(group_box)
-
-        # Create buttons for settings and start
-        self.settings_button = QPushButton('Settings', self)
+        # ============ CONTROL BUTTONS: Settings and Start Side-by-Side ============
+        control_buttons_layout = QHBoxLayout()
+        
+        # Add stretch to center the buttons
+        control_buttons_layout.addStretch()
+        
+        self.settings_button = QPushButton('Settings')
         self.settings_button.clicked.connect(self.open_settings)
-        vbox.addWidget(self.settings_button)
-
-        self.start_pause_button = QPushButton('Start', self)
-        self.start_pause_button.clicked.connect(self.start_or_pause_download)
-        vbox.addWidget(self.start_pause_button)
-
-        # Add output window and progress indicators
-        output_window_header = QLabel('Logs')
-        vbox.addWidget(output_window_header)
+        control_buttons_layout.addWidget(self.settings_button)
         
-        # Use existing output_window instead of creating a new one
-        vbox.addWidget(self.output_window)
+        self.start_pause_button = QPushButton('Start')
+        self.start_pause_button.clicked.connect(self.start_or_pause_download)
+        control_buttons_layout.addWidget(self.start_pause_button)
+        
+        # Add stretch to center the buttons
+        control_buttons_layout.addStretch()
+        
+        main_layout.addLayout(control_buttons_layout)
 
-        queue_header = QLabel('Progress')
-        vbox.addWidget(queue_header)
+        # ============ PROGRESS INDICATORS ============
+        # Create the toggle button instance here, as it's used by toggle_output_window
+        # and create_collapsible_output_section will no longer create it.
+        self.output_toggle_button = QPushButton('Show Logs') # Initial text
+        self.output_toggle_button.clicked.connect(self.toggle_output_window)
+        # self.output_window is already created and will be managed by create_collapsible_output_section
 
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setFormat("%p%")  # Show percentage centered
-        self.progress_bar.setAlignment(Qt.AlignCenter)  # Center the text
-        vbox.addWidget(self.progress_bar)
+        progress_header = QLabel('Progress')
+        progress_header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        main_layout.addWidget(progress_header)
 
-        # Create horizontal layout for download status information
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.progress_bar)
+
+        # Download status information
         download_status_layout = QHBoxLayout()
         
         # Left side for speed and ETA
         status_left = QVBoxLayout()
-        
         download_info_header = QLabel('Download Speed & ETA')
         status_left.addWidget(download_info_header)
         
-        self.download_speed_label = QLabel(self)
+        self.download_speed_label = QLabel()
         status_left.addWidget(self.download_speed_label)
         
-        self.download_eta_label = QLabel(self)
+        self.download_eta_label = QLabel()
         status_left.addWidget(self.download_eta_label)
         
         download_status_layout.addLayout(status_left)
-        
-        # Add stretch to push the file size to the right
         download_status_layout.addStretch()
         
         # Right side for file size
         status_right = QVBoxLayout()
-        
         filesize_header = QLabel('File Size')
         filesize_header.setAlignment(Qt.AlignRight)
         status_right.addWidget(filesize_header)
         
-        self.download_size_label = QLabel(self)
+        self.download_size_label = QLabel()
         self.download_size_label.setAlignment(Qt.AlignRight)
         status_right.addWidget(self.download_size_label)
         
-        # Add an empty label to align with ETA label
-        empty_label = QLabel(self)
-        status_right.addWidget(empty_label)
+        # Empty label for alignment
+        status_right.addWidget(QLabel())
         
         download_status_layout.addLayout(status_right)
-        
-        # Add the horizontal layout to the main vertical layout
-        vbox.addLayout(download_status_layout)
+        main_layout.addLayout(download_status_layout)
 
-        self.setLayout(vbox)
+        # ============ BOTTOM SECTION: Collapsible Output Window (Window only) ============
+        # This method will now just return the frame with the output_window
+        self.output_frame = self.create_collapsible_output_section()
+        main_layout.addWidget(self.output_frame) # Add the frame containing the text area
 
+        # ============ LOGS TOGGLE BUTTON (at the very bottom, right-justified) ============
+        logs_button_layout = QHBoxLayout()
+        logs_button_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        logs_button_layout.addStretch()
+        logs_button_layout.addWidget(self.output_toggle_button) # Add the pre-created button
+        main_layout.addLayout(logs_button_layout)
+
+        self.setLayout(main_layout)
         self.setWindowTitle('Myrient Downloader')
-        self.resize(1200, 900)
+        
+        # Set a reasonable width but let height be determined by content
+        self.setMinimumWidth(1000)
+        self.setMaximumWidth(1400)
         
         # Initialize checkbox visibility based on the current platform
         self.update_checkboxes_for_platform()
         
+        # Let Qt calculate the optimal size based on content, then show
+        self.adjustSize()
+        
+        # Ensure the window doesn't get too small
+        current_size = self.size()
+        if current_size.height() < 500:
+            self.resize(current_size.width(), 500)
+        
+        # Initially hide the region filter
+        region_group.setVisible(False)
+        
         self.show()
+        
+        # Store region group reference for toggling visibility
+        self.region_filter_group = region_group
     
+    def create_collapsible_output_section(self):
+        """Create a collapsible output window section."""
+        # Create the main frame
+        output_frame = QFrame()
+        output_frame.setFrameStyle(QFrame.StyledPanel)
+        output_layout = QVBoxLayout(output_frame)
+        output_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Header with toggle button is now created and placed in initUI
+        
+        # Output window (initially hidden)
+        self.output_window.setMinimumHeight(200)
+        self.output_window.setMaximumHeight(400)
+        self.output_window.setVisible(False)      # Content area is initially hidden
+        output_layout.addWidget(self.output_window)
+        output_frame.setVisible(False)            # Frame itself is initially hidden
+        
+        return output_frame
+
+    def toggle_output_window(self):
+        """Toggle the visibility of the output window."""
+        if self.output_frame.isVisible():
+            self.output_frame.setVisible(False)
+            self.output_toggle_button.setText('Show Logs')
+            # Resize window to fit content without output section
+            self.adjustSize()
+        else:
+            self.output_frame.setVisible(True)
+            self.output_window.setVisible(True) # Ensure content is visible when frame is
+            self.output_toggle_button.setText('Hide Logs')
+            # Let the window expand to accommodate the output section
+            self.adjustSize()
+    
+    # Removed animation helper methods _on_hide_animation_finished and _on_show_animation_finished
+
+    def create_options_side_by_side(self):
+        """Create general and platform-specific options side by side."""
+        # General options widget
+        general_widget = QWidget()
+        general_layout = QVBoxLayout(general_widget)
+        general_layout.setContentsMargins(5, 5, 5, 5)
+        
+        general_options_group = QGroupBox("General Options")
+        general_options_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; font-weight: bold; }")
+        general_options_layout = QVBoxLayout()
+        
+        # Create general options grid
+        general_grid = QGridLayout()
+        general_grid.setHorizontalSpacing(20)
+        general_grid.setVerticalSpacing(10)
+        
+        # Add general options
+        row = 0
+        self.split_checkbox = QCheckBox('Split for FAT32 (if > 4GB)')
+        self.split_checkbox.setChecked(self.settings_manager.split_large_files)
+        general_grid.addWidget(self.split_checkbox, row, 0)
+        
+        self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit file')
+        self.keep_unsplit_dec_checkbox.setChecked(self.settings_manager.keep_unsplit_file)
+        general_grid.addWidget(self.keep_unsplit_dec_checkbox, row, 1)
+        
+        row += 1
+        self.organize_content_checkbox = QCheckBox('Group downloaded files per game')
+        self.organize_content_checkbox.setChecked(self.settings_manager.organize_content_to_folders)
+        general_grid.addWidget(self.organize_content_checkbox, row, 0, 1, 2)
+        
+        general_options_layout.addLayout(general_grid)
+        general_options_group.setLayout(general_options_layout)
+        general_layout.addWidget(general_options_group)
+        # Removed general_layout.addStretch() to allow groupbox to potentially fill more space
+        
+        # Platform-specific options widget
+        platform_widget = QWidget()
+        platform_layout = QVBoxLayout(platform_widget)
+        platform_layout.setContentsMargins(5, 5, 5, 5)
+        
+        self.platform_options_group = QGroupBox("Platform-Specific Options")
+        self.platform_options_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; font-weight: bold; }")
+        platform_options_layout = QVBoxLayout()
+        
+        # PS3 specific options
+        self.ps3_options_widget = QWidget()
+        ps3_layout = QVBoxLayout(self.ps3_options_widget)
+        ps3_layout.setContentsMargins(0, 0, 0, 0)
+        
+        ps3_grid = QGridLayout()
+        ps3_grid.setHorizontalSpacing(20)
+        ps3_grid.setVerticalSpacing(10)
+        
+        # PS3 options
+        row = 0
+        self.decrypt_checkbox = QCheckBox('Decrypt using PS3Dec')
+        self.decrypt_checkbox.setChecked(self.settings_manager.decrypt_iso)
+        ps3_grid.addWidget(self.decrypt_checkbox, row, 0)
+        
+        self.keep_enc_checkbox = QCheckBox('Keep encrypted PS3 ISO')
+        self.keep_enc_checkbox.setChecked(self.settings_manager.keep_encrypted_iso)
+        ps3_grid.addWidget(self.keep_enc_checkbox, row, 1)
+        
+        row += 1
+        self.extract_ps3_checkbox = QCheckBox('Extract ISO using extractps3iso')
+        self.extract_ps3_checkbox.setChecked(self.settings_manager.extract_ps3_iso)
+        ps3_grid.addWidget(self.extract_ps3_checkbox, row, 0, 1, 2)
+        
+        row += 1
+        self.keep_decrypted_iso_checkbox = QCheckBox('Keep decrypted ISO after extraction')
+        self.keep_decrypted_iso_checkbox.setChecked(self.settings_manager.keep_decrypted_iso_after_extraction)
+        ps3_grid.addWidget(self.keep_decrypted_iso_checkbox, row, 0, 1, 2)
+        
+        row += 1
+        ps3_grid.setRowMinimumHeight(row, 5)
+        
+        row += 1
+        self.keep_dkey_checkbox = QCheckBox('Keep PS3 ISO dkey file')
+        self.keep_dkey_checkbox.setChecked(self.settings_manager.keep_dkey_file)
+        ps3_grid.addWidget(self.keep_dkey_checkbox, row, 0, 1, 2)
+        
+        ps3_layout.addLayout(ps3_grid)
+        platform_options_layout.addWidget(self.ps3_options_widget)
+        
+        # PSN specific options
+        self.psn_options_widget = QWidget()
+        psn_layout = QGridLayout(self.psn_options_widget)
+        psn_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.split_pkg_checkbox = QCheckBox('Split PKG')
+        self.split_pkg_checkbox.setChecked(self.settings_manager.split_pkg)
+        psn_layout.addWidget(self.split_pkg_checkbox, 0, 0)
+        
+        platform_options_layout.addWidget(self.psn_options_widget)
+        platform_options_layout.addStretch()
+        
+        self.platform_options_group.setLayout(platform_options_layout)
+        platform_layout.addWidget(self.platform_options_group)
+        # Removed platform_layout.addStretch() to allow groupbox to potentially fill more space
+        
+        # Connect signals for all checkboxes
+        self._connect_checkbox_signals()
+        
+        # Set initial visibility states
+        self.update_all_checkbox_states()
+        self.ps3_options_widget.setVisible(False)
+        self.psn_options_widget.setVisible(False)
+        
+        return general_widget, platform_widget
+    
+    def _connect_checkbox_signals(self):
+        """Connect signals for all checkboxes."""
+        # General checkboxes
+        self.split_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_large_files', state))
+        self.keep_unsplit_dec_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_unsplit_file', state))
+        self.organize_content_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('organize_content_to_folders', state))
+        
+        # PS3 checkboxes
+        self.decrypt_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('decrypt_iso', state))
+        self.extract_ps3_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('extract_ps3_iso', state))
+        self.keep_enc_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_encrypted_iso', state))
+        self.keep_dkey_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_dkey_file', state))
+        self.keep_decrypted_iso_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_decrypted_iso_after_extraction', state))
+        
+        # PSN checkbox
+        self.split_pkg_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_pkg', state))
+
     def create_options_grid(self, parent_layout):
         """Create the options layout with sections for general and platform-specific options."""
         # Create group box for general options
@@ -520,8 +784,10 @@ class GUIDownloader(QWidget):
             print(f"Error updating checkboxes for platform: {str(e)}")
 
     def update_results(self):
-        """Filter the software list based on the search text."""
+        """Filter the software list based on search text and selected regions."""
         search_term = self.search_box.text().lower().split()
+        selected_regions = [region for region, checkbox in self.region_checkboxes.items()
+                          if checkbox.isChecked()]
         
         # Get the current platform based on the active tab
         current_tab = self.result_list.currentIndex()
@@ -530,7 +796,89 @@ class GUIDownloader(QWidget):
             current_platform = platform_ids[current_tab]
             list_to_search = self.platform_lists[current_platform]
             
+            # Apply search filter
             filtered_list = [item for item in list_to_search if all(word in item.lower() for word in search_term)]
+            
+            def has_exact_region(item, region):
+                """Check if item has exact region match in parentheses."""
+                return f"({region})" in item or f"({region.lower()})" in item.lower()
+            
+            def is_world_release(item):
+                """Check if item is a World release."""
+                return has_exact_region(item, "World")
+            
+            def is_world_release(item):
+                """Check if item is a World release."""
+                return "(world)" in item.lower()
+            
+            # Apply region filter if any regions are selected
+            if selected_regions:
+                if "World" in selected_regions:
+                    # Handle World releases
+                    world_matches = [item for item in filtered_list if is_world_release(item)]
+                    other_regions = [r for r in selected_regions if r not in ["World", "Other"]]
+                    
+                    if other_regions or "Other" in selected_regions:
+                        # Get items matching other selected regions exactly
+                        region_matches = []
+                        if other_regions:
+                            for item in filtered_list:
+                                if any(has_exact_region(item, region) for region in other_regions):
+                                    region_matches.append(item)
+                        
+                        if "Other" in selected_regions:
+                            # Add items that don't match any region exactly and aren't world releases
+                            no_region_matches = [
+                                item for item in filtered_list
+                                if not is_world_release(item) and not any(
+                                    has_exact_region(item, region)
+                                    for region in self.region_checkboxes.keys()
+                                    if region not in ["World", "Other"]
+                                )
+                            ]
+                            filtered_list = list(set(world_matches + region_matches + no_region_matches))
+                        else:
+                            filtered_list = list(set(world_matches + region_matches))
+                    else:
+                        # Only World releases
+                        filtered_list = world_matches
+                
+                elif "Other" in selected_regions:
+                    # Handle Other (excluding World releases)
+                    standard_regions = [r for r in selected_regions if r != "Other"]
+                    if standard_regions:
+                        # Get items matching standard regions exactly
+                        standard_matches = []
+                        for item in filtered_list:
+                            if any(has_exact_region(item, region) for region in standard_regions):
+                                standard_matches.append(item)
+                        
+                        # Get items not matching any region exactly and not world releases
+                        no_region_matches = [
+                            item for item in filtered_list
+                            if not is_world_release(item) and not any(
+                                has_exact_region(item, region)
+                                for region in self.region_checkboxes.keys()
+                                if region not in ["World", "Other"]
+                            )
+                        ]
+                        filtered_list = list(set(standard_matches + no_region_matches))
+                    else:
+                        # Only "Other" is selected - show items not matching any region exactly and not world releases
+                        filtered_list = [
+                            item for item in filtered_list
+                            if not is_world_release(item) and not any(
+                                has_exact_region(item, region)
+                                for region in self.region_checkboxes.keys()
+                                if region not in ["World", "Other"]
+                            )
+                        ]
+                else:
+                    # Normal region filtering - match regions exactly
+                    filtered_list = [
+                        item for item in filtered_list
+                        if any(has_exact_region(item, region) for region in selected_regions)
+                    ]
             
             # Clear the current list widget and add the filtered items
             current_list_widget = self.result_list.currentWidget()
@@ -579,6 +927,18 @@ class GUIDownloader(QWidget):
             self.settings_manager.create_directories()
     
     
+
+    def toggle_region_filter(self):
+        """Toggle visibility of the region filter group."""
+        is_visible = self.region_filter_group.isVisible()
+        self.region_filter_group.setVisible(not is_visible)
+        self.filters_button.setChecked(not is_visible)
+    
+    def toggle_region_filter(self):
+        """Toggle visibility of the region filter group."""
+        is_visible = self.region_filter_group.isVisible()
+        self.region_filter_group.setVisible(not is_visible)
+        self.filters_button.setChecked(not is_visible)
 
     def closeEvent(self, event):
         """Handle the close event."""
@@ -748,6 +1108,9 @@ class GUIDownloader(QWidget):
 
     def _on_error(self, error_message):
         """Handle error signal from AppController."""
+        # Show output window when there's an error
+        if not self.output_window.isVisible():
+            self.toggle_output_window()
         self.output_window.append(f"ERROR: {error_message}")
 
 

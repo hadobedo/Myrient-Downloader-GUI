@@ -13,10 +13,10 @@ class SplitPkgThread(QThread):
     progress = pyqtSignal(str)
     status = pyqtSignal(bool)
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, overwrite_manager=None):
         QThread.__init__(self)
         self.file_path = file_path
-
+        self.overwrite_manager = overwrite_manager
     def run(self):
         file_size = os.path.getsize(self.file_path)
         if file_size < 4294967295:
@@ -25,6 +25,33 @@ class SplitPkgThread(QThread):
         else:
             chunk_size = 4294967295
             num_parts = -(-file_size // chunk_size)
+            
+            # Check for existing split files if overwrite manager is available
+            if self.overwrite_manager:
+                existing_parts = []
+                for i in range(num_parts):
+                    split_file_path = os.path.join(os.path.dirname(self.file_path), f"{Path(self.file_path).stem}.pkg.666{str(i).zfill(2)}")
+                    if os.path.exists(split_file_path):
+                        existing_parts.append({
+                            'path': split_file_path,
+                            'existing_size': os.path.getsize(split_file_path),
+                            'new_size': min(chunk_size, file_size - (i * chunk_size))
+                        })
+                
+                if existing_parts:
+                    from gui.overwrite_dialog import OverwriteDialog
+                    choice, _ = self.overwrite_manager.handle_conflict(
+                        existing_parts, "processing", None
+                    )
+                    
+                    if choice == OverwriteDialog.CANCEL:
+                        self.status.emit(False)
+                        return
+                    elif choice == OverwriteDialog.SKIP:
+                        self.status.emit(True)  # Consider existing files as successful
+                        return
+                    # If OVERWRITE or RENAME, continue with splitting
+            
             with open(self.file_path, 'rb') as f:
                 i = 0
                 while True:
@@ -156,7 +183,7 @@ class UnzipRunner(QThread):
     progress_signal = pyqtSignal(int)
     unzip_paused_signal = pyqtSignal()
 
-    def __init__(self, zip_path, output_path):
+    def __init__(self, zip_path, output_path, overwrite_manager=None):
         super().__init__()
         self.zip_path = zip_path
         self.output_path = output_path
@@ -164,6 +191,7 @@ class UnzipRunner(QThread):
         self.running = True
         self.paused = False
         self.partial_files = []  # Track files being extracted
+        self.overwrite_manager = overwrite_manager
 
     def _should_preserve_folder_structure(self, zip_ref):
         """
@@ -260,24 +288,63 @@ class UnzipRunner(QThread):
                         # Unzip stopped
                         self.cleanup_partial_files()  # Clean up when stopped too
                         return
-
                     file_out_path = self._get_extraction_path(info, preserve_structure, common_root)
                     
                     # Create directories if needed for structure preservation
                     os.makedirs(os.path.dirname(file_out_path), exist_ok=True)
-                    # Skip if file already exists and is complete (for resuming)
-                    if os.path.exists(file_out_path) and os.path.getsize(file_out_path) == info.file_size:
-                        # File already exists and is complete, skipping
-                        self.extracted_files.append(file_out_path)
-                        extracted_size += info.file_size
-                        processed_files += 1
+                    
+                    # Check for existing file and handle conflicts
+                    if os.path.exists(file_out_path):
+                        existing_size = os.path.getsize(file_out_path)
                         
-                        # Update progress for skipped files too
-                        size_progress = (extracted_size / total_size) * 100 if total_size > 0 else 0
-                        file_progress = (processed_files / file_count) * 100 if file_count > 0 else 0
-                        progress_percent = max(size_progress, file_progress)
-                        self.progress_signal.emit(int(min(progress_percent, 100)))
-                        continue
+                        # Skip if file already exists and is complete (for resuming)
+                        if existing_size == info.file_size:
+                            # File already exists and is complete, skipping
+                            self.extracted_files.append(file_out_path)
+                            extracted_size += info.file_size
+                            processed_files += 1
+                            
+                            # Update progress for skipped files too
+                            size_progress = (extracted_size / total_size) * 100 if total_size > 0 else 0
+                            file_progress = (processed_files / file_count) * 100 if file_count > 0 else 0
+                            progress_percent = max(size_progress, file_progress)
+                            self.progress_signal.emit(int(min(progress_percent, 100)))
+                            continue
+                        
+                        # Handle file conflict with overwrite manager if available
+                        if self.overwrite_manager:
+                            from gui.overwrite_dialog import OverwriteDialog
+                            
+                            conflict_info = {
+                                'path': file_out_path,
+                                'existing_size': existing_size,
+                                'new_size': info.file_size
+                            }
+                            
+                            choice, _ = self.overwrite_manager.handle_conflict(
+                                conflict_info, "extraction", None  # No parent widget in thread
+                            )
+                            
+                            if choice == OverwriteDialog.CANCEL:
+                                # Stop extraction
+                                self.running = False
+                                return
+                            elif choice == OverwriteDialog.SKIP:
+                                # Skip this file, keep existing
+                                self.extracted_files.append(file_out_path)
+                                extracted_size += info.file_size  # Count as processed
+                                processed_files += 1
+                                
+                                # Update progress for skipped files
+                                size_progress = (extracted_size / total_size) * 100 if total_size > 0 else 0
+                                file_progress = (processed_files / file_count) * 100 if file_count > 0 else 0
+                                progress_percent = max(size_progress, file_progress)
+                                self.progress_signal.emit(int(min(progress_percent, 100)))
+                                continue
+                            elif choice == OverwriteDialog.RENAME:
+                                # Generate unique filename
+                                file_out_path = self._generate_unique_filename(file_out_path)
+                            # If OVERWRITE, continue with normal extraction (will overwrite)
                     
                     # Add to partial files since we're going to extract it
                     self.partial_files.append(file_out_path)
@@ -370,3 +437,17 @@ class UnzipRunner(QThread):
     def resume(self):
         """Resume the extraction process"""
         self.paused = False
+    
+    def _generate_unique_filename(self, file_path):
+        """Generate a unique filename by adding a suffix."""
+        directory = os.path.dirname(file_path)
+        filename = os.path.basename(file_path)
+        name, ext = os.path.splitext(filename)
+        
+        counter = 1
+        while True:
+            new_filename = f"{name} ({counter}){ext}"
+            new_path = os.path.join(directory, new_filename)
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1

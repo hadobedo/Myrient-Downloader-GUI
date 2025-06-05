@@ -6,6 +6,7 @@ import sys
 import tempfile
 from PyQt5.QtCore import QEventLoop
 from threads.processing_threads import CommandRunner, SplitPkgThread
+from gui.overwrite_dialog import OverwriteManager, OverwriteDialog
 class PS3FileProcessor:
     """Handles PS3-specific file processing operations like decrypting ISOs and splitting PKGs."""
     
@@ -15,6 +16,7 @@ class PS3FileProcessor:
         self.output_window = output_window
         self.parent = parent
         self.progress_callback = None
+        self.overwrite_manager = OverwriteManager()
         
     def set_progress_callback(self, callback):
         """Set a callback function for progress updates."""
@@ -88,7 +90,7 @@ class PS3FileProcessor:
             self.output_window.append(f"File {pkg_path} is smaller than 4GB. Skipping split.")
             return False
             
-        split_pkg_thread = SplitPkgThread(pkg_path)
+        split_pkg_thread = SplitPkgThread(pkg_path, self.overwrite_manager)
         split_pkg_thread.progress.connect(self._print_progress)
         if self.progress_callback:
             split_pkg_thread.progress.connect(lambda text: self._parse_split_progress(text))
@@ -106,6 +108,43 @@ class PS3FileProcessor:
         base_name = os.path.splitext(os.path.basename(iso_path))[0]
         parent_dir = os.path.dirname(iso_path)
         expected_extraction_dir = os.path.join(parent_dir, base_name)
+        
+        # Check if extraction directory already exists and handle conflict
+        if os.path.exists(expected_extraction_dir):
+            try:
+                existing_size = sum(os.path.getsize(os.path.join(dirpath, filename))
+                                  for dirpath, dirnames, filenames in os.walk(expected_extraction_dir)
+                                  for filename in filenames)
+            except OSError:
+                existing_size = 0
+            
+            conflict_info = {
+                'path': expected_extraction_dir,
+                'existing_size': existing_size,
+                'new_size': 0  # Unknown until extraction
+            }
+            
+            choice, _ = self.overwrite_manager.handle_conflict(
+                conflict_info, "extraction", self._get_main_window()
+            )
+            
+            if choice == OverwriteDialog.CANCEL:
+                self.output_window.append("ISO extraction cancelled due to existing directory.")
+                return (False, expected_extraction_dir)
+            elif choice == OverwriteDialog.SKIP:
+                self.output_window.append(f"Skipping ISO extraction - directory already exists: {expected_extraction_dir}")
+                return (True, expected_extraction_dir)  # Return as successful since content exists
+            elif choice == OverwriteDialog.RENAME:
+                # Generate unique directory name
+                expected_extraction_dir = self._generate_unique_dirname(expected_extraction_dir)
+                self.output_window.append(f"Extracting to renamed directory: {expected_extraction_dir}")
+            elif choice == OverwriteDialog.OVERWRITE:
+                # Remove existing directory
+                try:
+                    shutil.rmtree(expected_extraction_dir)
+                    self.output_window.append(f"Removed existing extraction directory: {expected_extraction_dir}")
+                except Exception as e:
+                    self.output_window.append(f"Warning: Could not remove existing directory: {e}")
         
         try:
             # Check if extractps3iso is available - use settings manager first
@@ -335,3 +374,25 @@ class PS3FileProcessor:
                                     break
                     except (ValueError, ZeroDivisionError):
                         continue
+   
+    def _generate_unique_dirname(self, dir_path):
+        """Generate a unique directory name by adding a suffix."""
+        parent_dir = os.path.dirname(dir_path)
+        dir_name = os.path.basename(dir_path)
+        
+        counter = 1
+        while True:
+            new_dir_name = f"{dir_name} ({counter})"
+            new_path = os.path.join(parent_dir, new_dir_name)
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+    
+    def reset_overwrite_choices(self):
+        """Reset overwrite manager choices for new processing session."""
+        self.overwrite_manager.reset()
+    
+    def _get_main_window(self):
+        """Get the main window for dialog parenting."""
+        # Return the parent window that was passed during initialization
+        return self.parent

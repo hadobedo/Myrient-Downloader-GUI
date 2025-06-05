@@ -9,6 +9,7 @@ from PyQt5.QtGui import QColor
 from core.ps3_fileprocessor import PS3FileProcessor
 from threads.processing_threads import UnzipRunner, CommandRunner, SplitIsoThread, SplitPkgThread
 from core.settings import BinaryValidationDialog
+from gui.overwrite_dialog import OverwriteManager, OverwriteDialog
 
 
 class ProcessingManager(QObject):
@@ -30,14 +31,17 @@ class ProcessingManager(QObject):
         self.current_file_path = None
         self.unzip_runner = None
         self.processors = {}  # Cache processors by platform
+        self.overwrite_manager = OverwriteManager()
         
     def get_ps3_processor(self):
         """Get or create a PS3 processor."""
         if 'ps3' not in self.processors:
             processor = PS3FileProcessor(
-                self.settings_manager, self.output_window, None
+                self.settings_manager, self.output_window, self._get_main_window()
             )
             processor.set_progress_callback(self.progress_updated.emit)
+            # Share overwrite manager with PS3 processor
+            processor.overwrite_manager = self.overwrite_manager
             self.processors['ps3'] = processor
         return self.processors['ps3']
     
@@ -457,7 +461,7 @@ class ProcessingManager(QObject):
         self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
         self.progress_updated.emit(0)
         
-        self.unzip_runner = UnzipRunner(zip_path, output_path)
+        self.unzip_runner = UnzipRunner(zip_path, output_path, self.overwrite_manager)
         # Connect progress signal to ensure unzip progress shows in progress bar
         self.unzip_runner.progress_signal.connect(self.progress_updated.emit)
         self.unzip_runner.unzip_paused_signal.connect(self.processing_paused.emit)
@@ -591,7 +595,7 @@ class ProcessingManager(QObject):
     def _move_file_to_directory(self, source_file_path, target_final_dir, queue_position):
         """
         Move a file from source_file_path (expected to be in processing_dir or elsewhere)
-        to the target_final_dir. Handles existing files in the target.
+        to the target_final_dir. Handles existing files in the target with user prompts.
         """
         if not os.path.exists(source_file_path):
             self.output_window.append(f"({queue_position}) Source file for move does not exist: {source_file_path}")
@@ -602,21 +606,54 @@ class ProcessingManager(QObject):
         # Ensure target directory exists
         os.makedirs(target_final_dir, exist_ok=True)
 
+        # Check for existing file and handle conflict
         if os.path.exists(target_file_path):
             try:
-                # Simple overwrite: remove existing file at destination
-                os.remove(target_file_path)
-                self.output_window.append(f"({queue_position}) Removed existing file at destination: {target_file_path}")
-            except Exception as e:
-                self.output_window.append(f"({queue_position}) Warning: Could not remove existing file at {target_file_path}: {e}. Move may fail.")
-                # Optionally, could append a suffix or skip, but overwrite is simpler for now.
+                source_size = os.path.getsize(source_file_path)
+                existing_size = os.path.getsize(target_file_path)
+            except OSError:
+                source_size = 0
+                existing_size = 0
+            
+            conflict_info = {
+                'path': target_file_path,
+                'existing_size': existing_size,
+                'new_size': source_size
+            }
+            
+            choice, _ = self.overwrite_manager.handle_conflict(
+                conflict_info, "processing", self._get_main_window()
+            )
+            
+            if choice == OverwriteDialog.CANCEL:
+                self.output_window.append(f"({queue_position}) Move cancelled for {os.path.basename(source_file_path)}")
+                return
+            elif choice == OverwriteDialog.SKIP:
+                self.output_window.append(f"({queue_position}) Skipped moving {os.path.basename(source_file_path)} - file already exists")
+                # Remove source file since we're keeping the existing one
+                try:
+                    os.remove(source_file_path)
+                except Exception as e:
+                    self.output_window.append(f"({queue_position}) Warning: Could not remove source file: {e}")
+                return
+            elif choice == OverwriteDialog.RENAME:
+                # Generate a new unique filename
+                target_file_path = self._generate_unique_filename(target_file_path)
+                self.output_window.append(f"({queue_position}) Renamed to avoid conflict: {os.path.basename(target_file_path)}")
+            # If OVERWRITE, continue with normal move (will overwrite existing)
+            
+            if choice == OverwriteDialog.OVERWRITE:
+                try:
+                    os.remove(target_file_path)
+                    self.output_window.append(f"({queue_position}) Removed existing file at destination: {target_file_path}")
+                except Exception as e:
+                    self.output_window.append(f"({queue_position}) Warning: Could not remove existing file at {target_file_path}: {e}")
         
         try:
-            shutil.move(source_file_path, target_file_path) # Move to target_file_path to place it IN the dir
+            shutil.move(source_file_path, target_file_path)
             self.output_window.append(f"({queue_position}) Moved {os.path.basename(source_file_path)} to {target_final_dir}")
         except Exception as e:
             self.output_window.append(f"({queue_position}) Error moving file {source_file_path} to {target_final_dir}: {e}")
-            # If move fails, source_file_path remains.
     
     def _handle_dkey_file(self, base_name, queue_position, keep_dkey, final_target_dir=None, organize_content=False):
         """Handle dkey file deletion or moving."""
@@ -665,8 +702,7 @@ class ProcessingManager(QObject):
     def _merge_directories(self, source_dir, target_dir, queue_position):
         """
         Recursively merges contents of source_dir into target_dir.
-        - Preserves existing files and folders in target_dir unless there's a name conflict.
-        - Overwrites conflicting files in target_dir with files from source_dir.
+        - Prompts user for conflicts with existing files and folders.
         - Recursively merges subdirectories.
         Returns True if merge is successful, False otherwise.
         """
@@ -703,9 +739,42 @@ class ProcessingManager(QObject):
                             self.output_window.append(f"({queue_position}) Conflict: Cannot overwrite directory '{target_item_path}' with file '{source_item_path}'. Skipping.")
                             overall_success = False
                             continue
-                        else: # Target is a file, overwrite
-                            self.output_window.append(f"({queue_position}) Overwriting file: '{target_item_path}' with content from '{source_item_path}'")
-                            os.remove(target_item_path)
+                        else: # Target is a file, handle conflict
+                            try:
+                                source_size = os.path.getsize(source_item_path)
+                                existing_size = os.path.getsize(target_item_path)
+                            except OSError:
+                                source_size = 0
+                                existing_size = 0
+                            
+                            conflict_info = {
+                                'path': target_item_path,
+                                'existing_size': existing_size,
+                                'new_size': source_size
+                            }
+                            
+                            choice, _ = self.overwrite_manager.handle_conflict(
+                                conflict_info, "extraction", self._get_main_window()
+                            )
+                            
+                            if choice == OverwriteDialog.CANCEL:
+                                self.output_window.append(f"({queue_position}) Merge cancelled at file: '{item_name}'")
+                                return False
+                            elif choice == OverwriteDialog.SKIP:
+                                self.output_window.append(f"({queue_position}) Skipped merging file: '{item_name}' - keeping existing")
+                                # Remove source file since we're keeping the existing one
+                                try:
+                                    os.remove(source_item_path)
+                                except Exception:
+                                    pass
+                                continue
+                            elif choice == OverwriteDialog.RENAME:
+                                # Generate unique name for the new file
+                                target_item_path = self._generate_unique_filename(target_item_path)
+                                self.output_window.append(f"({queue_position}) Renaming to avoid conflict: '{os.path.basename(target_item_path)}'")
+                            elif choice == OverwriteDialog.OVERWRITE:
+                                self.output_window.append(f"({queue_position}) Overwriting file: '{target_item_path}' with content from '{source_item_path}'")
+                                os.remove(target_item_path)
                     else:
                         self.output_window.append(f"({queue_position}) Moving new file: '{item_name}' to '{target_dir}'")
 
@@ -747,14 +816,65 @@ class ProcessingManager(QObject):
                     except Exception as e_rm:
                         self.output_window.append(f"({queue_position}) Failed to remove existing target directory {target_path} for fallback: {e_rm}. Move may fail.")
             elif os.path.exists(target_path): # Target exists but not suitable for merge (e.g., file or source is file)
-                self.output_window.append(f"({queue_position}) Target '{target_path}' exists. Removing before move.")
+                # Handle conflict with overwrite manager
                 try:
-                    if os.path.isdir(target_path):
-                        shutil.rmtree(target_path)
+                    if os.path.isdir(source_path):
+                        source_size = sum(os.path.getsize(os.path.join(dirpath, filename))
+                                        for dirpath, dirnames, filenames in os.walk(source_path)
+                                        for filename in filenames)
                     else:
-                        os.remove(target_path)
-                except Exception as e_rm:
-                    self.output_window.append(f"({queue_position}) Failed to remove existing target {target_path}: {e_rm}. Move may fail.")
+                        source_size = os.path.getsize(source_path)
+                    
+                    if os.path.isdir(target_path):
+                        existing_size = sum(os.path.getsize(os.path.join(dirpath, filename))
+                                          for dirpath, dirnames, filenames in os.walk(target_path)
+                                          for filename in filenames)
+                    else:
+                        existing_size = os.path.getsize(target_path)
+                except OSError:
+                    source_size = 0
+                    existing_size = 0
+                
+                conflict_info = {
+                    'path': target_path,
+                    'existing_size': existing_size,
+                    'new_size': source_size
+                }
+                
+                choice, _ = self.overwrite_manager.handle_conflict(
+                    conflict_info, "processing", self._get_main_window()
+                )
+                
+                if choice == OverwriteDialog.CANCEL:
+                    self.output_window.append(f"({queue_position}) Move cancelled for {os.path.basename(source_path)}")
+                    return
+                elif choice == OverwriteDialog.SKIP:
+                    self.output_window.append(f"({queue_position}) Skipped moving {os.path.basename(source_path)} - keeping existing")
+                    # Remove source since we're keeping existing
+                    try:
+                        if os.path.isdir(source_path):
+                            shutil.rmtree(source_path)
+                        else:
+                            os.remove(source_path)
+                    except Exception as e:
+                        self.output_window.append(f"({queue_position}) Warning: Could not remove source: {e}")
+                    return
+                elif choice == OverwriteDialog.RENAME:
+                    # Generate unique name for target
+                    if os.path.isdir(source_path):
+                        target_path = self._generate_unique_dirname(target_path)
+                    else:
+                        target_path = self._generate_unique_filename(target_path)
+                    self.output_window.append(f"({queue_position}) Renaming to avoid conflict: {os.path.basename(target_path)}")
+                elif choice == OverwriteDialog.OVERWRITE:
+                    self.output_window.append(f"({queue_position}) Overwriting existing: {target_path}")
+                    try:
+                        if os.path.isdir(target_path):
+                            shutil.rmtree(target_path)
+                        else:
+                            os.remove(target_path)
+                    except Exception as e_rm:
+                        self.output_window.append(f"({queue_position}) Failed to remove existing target {target_path}: {e_rm}. Move may fail.")
 
             # Proceed with move if not merged or if it was a file
             if os.path.exists(source_path):
@@ -797,14 +917,65 @@ class ProcessingManager(QObject):
                     except Exception as e_rm:
                         self.output_window.append(f"({queue_position}) Failed to remove existing target directory {target_path} for fallback: {e_rm}. Move may fail.")
             elif os.path.exists(target_path): # Target exists but not suitable for merge (e.g. it's a file)
-                 self.output_window.append(f"({queue_position}) Target '{target_path}' exists and is not a directory or source is not a directory. Removing before move.")
-                 try:
-                    if os.path.isdir(target_path):
-                        shutil.rmtree(target_path)
+                # Handle conflict with overwrite manager
+                try:
+                    if os.path.isdir(source_dir):
+                        source_size = sum(os.path.getsize(os.path.join(dirpath, filename))
+                                        for dirpath, dirnames, filenames in os.walk(source_dir)
+                                        for filename in filenames)
                     else:
-                        os.remove(target_path)
-                 except Exception as e_rm:
-                    self.output_window.append(f"({queue_position}) Failed to remove existing target {target_path}: {e_rm}. Move may fail.")
+                        source_size = os.path.getsize(source_dir)
+                    
+                    if os.path.isdir(target_path):
+                        existing_size = sum(os.path.getsize(os.path.join(dirpath, filename))
+                                          for dirpath, dirnames, filenames in os.walk(target_path)
+                                          for filename in filenames)
+                    else:
+                        existing_size = os.path.getsize(target_path)
+                except OSError:
+                    source_size = 0
+                    existing_size = 0
+                
+                conflict_info = {
+                    'path': target_path,
+                    'existing_size': existing_size,
+                    'new_size': source_size
+                }
+                
+                choice, _ = self.overwrite_manager.handle_conflict(
+                    conflict_info, "processing", self.parent()
+                )
+                
+                if choice == OverwriteDialog.CANCEL:
+                    self.output_window.append(f"({queue_position}) Move cancelled for {os.path.basename(source_dir)}")
+                    return
+                elif choice == OverwriteDialog.SKIP:
+                    self.output_window.append(f"({queue_position}) Skipped moving {os.path.basename(source_dir)} - keeping existing")
+                    # Remove source since we're keeping existing
+                    try:
+                        if os.path.isdir(source_dir):
+                            shutil.rmtree(source_dir)
+                        else:
+                            os.remove(source_dir)
+                    except Exception as e:
+                        self.output_window.append(f"({queue_position}) Warning: Could not remove source: {e}")
+                    return
+                elif choice == OverwriteDialog.RENAME:
+                    # Generate unique name for target
+                    if os.path.isdir(source_dir):
+                        target_path = self._generate_unique_dirname(target_path)
+                    else:
+                        target_path = self._generate_unique_filename(target_path)
+                    self.output_window.append(f"({queue_position}) Renaming to avoid conflict: {os.path.basename(target_path)}")
+                elif choice == OverwriteDialog.OVERWRITE:
+                    self.output_window.append(f"({queue_position}) Overwriting existing: {target_path}")
+                    try:
+                        if os.path.isdir(target_path):
+                            shutil.rmtree(target_path)
+                        else:
+                            os.remove(target_path)
+                    except Exception as e_rm:
+                        self.output_window.append(f"({queue_position}) Failed to remove existing target {target_path}: {e_rm}. Move may fail.")
             
             # Proceed with move if not merged or if target didn't exist
             if os.path.exists(source_dir):
@@ -886,3 +1057,42 @@ class ProcessingManager(QObject):
         """Clear current operation state."""
         self.current_operation = None
         self.current_file_path = None
+    
+    def reset_overwrite_choices(self):
+        """Reset overwrite manager choices for new processing session."""
+        self.overwrite_manager.reset()
+    
+    def _generate_unique_filename(self, file_path):
+        """Generate a unique filename by adding a suffix."""
+        directory = os.path.dirname(file_path)
+        filename = os.path.basename(file_path)
+        name, ext = os.path.splitext(filename)
+        
+        counter = 1
+        while True:
+            new_filename = f"{name} ({counter}){ext}"
+            new_path = os.path.join(directory, new_filename)
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+    
+    def _generate_unique_dirname(self, dir_path):
+        """Generate a unique directory name by adding a suffix."""
+        parent_dir = os.path.dirname(dir_path)
+        dir_name = os.path.basename(dir_path)
+        
+        counter = 1
+        while True:
+            new_dir_name = f"{dir_name} ({counter})"
+            new_path = os.path.join(parent_dir, new_dir_name)
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+    
+    def _get_main_window(self):
+        """Get the main window for dialog parenting."""
+        # self.parent() is AppController, AppController.parent() is GUIDownloader (main window)
+        app_controller = self.parent()
+        if app_controller:
+            return app_controller.parent()
+        return None
