@@ -69,7 +69,7 @@ class AppController(QObject):
         self.processing_manager.error_occurred.connect(self.error_occurred.emit)
     
     def load_queue(self):
-        """Load the download queue."""
+        """Load the download queue and size information."""
         return self.queue_manager.load_queue()
     
     def save_queue(self, queue_list_widget):
@@ -85,13 +85,52 @@ class AppController(QObject):
             item_text = item.text()
             formatted_text = f"({platform_name}) {item_text}"
             
-            if self.queue_manager.add_to_queue(formatted_text, queue_list_widget, platforms):
+            # Get file size from the stored JSON data
+            file_size = self._get_file_size_from_cache(current_platform, item_text)
+            
+            # Create item data with size
+            item_data = {
+                'name': formatted_text,
+                'size': file_size
+            }
+            
+            if self.queue_manager.add_to_queue(item_data, queue_list_widget, platforms):
                 added_count += 1
         
         if added_count > 0:
             self.save_queue(queue_list_widget)
         
         return added_count
+        
+    def _get_file_size_from_cache(self, platform_id, filename):
+        """Get file size from cached JSON data."""
+        try:
+            import json
+            import os
+            
+            json_file = os.path.join("config", f"{platform_id}_filelist.json")
+            if os.path.exists(json_file):
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    
+                    # Handle new format with file sizes
+                    if data and isinstance(data[0], dict):
+                        # Find the file in the data
+                        for file_info in data:
+                            if file_info.get('name') == filename:
+                                return file_info.get('size', '')
+                    # Handle old format - no sizes available
+                    elif data and isinstance(data[0], str):
+                        # Convert to new format with size fetching
+                        return self._fetch_file_size_for_item(f"({platform_id.upper()}) {filename}")
+        except Exception as e:
+            print(f"Error getting file size from cache: {e}")
+        
+        return ""
+    
+    def _fetch_file_size_for_item(self, item_text):
+        """Fetch file size for a queue item (fallback method)."""
+        return self.queue_manager._fetch_file_size_for_item(item_text)
     
     def remove_from_queue(self, selected_items, queue_list_widget):
         """Remove selected items from the download queue."""
@@ -99,11 +138,11 @@ class AppController(QObject):
         
         for item in selected_items:
             # Get the original name from the item's data
-            original_name = item.data(Qt.UserRole) if item.data(Qt.UserRole) else item.text()
+            original_name = item.data(0, Qt.UserRole) if item.data(0, Qt.UserRole) else item.text(0)
             
             # Check if this is a download in progress or paused
-            is_current_download = (self.current_item == original_name and 
-                                  self.current_file_path and 
+            is_current_download = (self.current_item == original_name and
+                                  self.current_file_path and
                                   os.path.exists(self.current_file_path))
             
             if is_current_download:
@@ -131,17 +170,17 @@ class AppController(QObject):
         if not is_resuming_session:
             # Fresh start
             self.processed_items = 0
-            self.total_items = queue_list_widget.count()
+            self.total_items = queue_list_widget.topLevelItemCount()
             
             # Reset overwrite choices for new download session
             self.download_manager.reset_overwrite_choices()
             self.processing_manager.reset_overwrite_choices()
         
         # Process queue until empty
-        while queue_list_widget.count() > 0 and not self.is_paused:
+        while queue_list_widget.topLevelItemCount() > 0 and not self.is_paused:
             # Get the first item in the queue
-            current_queue_item = queue_list_widget.item(0)
-            item_original_name = current_queue_item.data(Qt.UserRole) if current_queue_item.data(Qt.UserRole) else current_queue_item.text()
+            current_queue_item = queue_list_widget.topLevelItem(0)
+            item_original_name = current_queue_item.data(0, Qt.UserRole) if current_queue_item.data(0, Qt.UserRole) else current_queue_item.text(0)
             
             if not is_resuming_session or self.current_item != item_original_name:
                 self.processed_items += 1
@@ -152,7 +191,7 @@ class AppController(QObject):
             self.current_queue_item = current_queue_item
             
             # Update queue item appearance
-            self._update_queue_item_status(current_queue_item, "DOWNLOADING", QColor(0, 128, 255))
+            self._update_queue_item_status(current_queue_item, "DOWNLOADING", QColor(0, 128, 255), size=None)
             
             # Process item based on its type
             platform_id = self.queue_manager.get_platform_from_queue_item(item_original_name)
@@ -164,7 +203,7 @@ class AppController(QObject):
             
             # Remove item from queue if not paused
             if not self.is_paused:
-                queue_list_widget.takeItem(0)
+                queue_list_widget.takeTopLevelItem(0)
                 # Save queue immediately after removing completed item
                 self.save_queue(queue_list_widget)
             
@@ -213,17 +252,25 @@ class AppController(QObject):
         queue_list_widget.clear()
         
         # Add the current paused item first with (PAUSED) status
-        current_item_text = pause_state['current_item']
-        paused_item = self.queue_manager.add_formatted_item_to_queue(current_item_text, queue_list_widget)
+        current_item_data = pause_state['current_item']
+        # Handle both old string format and new dict format
+        if isinstance(current_item_data, dict):
+            paused_item = self.queue_manager.add_formatted_item_to_queue(current_item_data, queue_list_widget)
+        else:
+            paused_item = self.queue_manager.add_formatted_item_to_queue(current_item_data, queue_list_widget)
         
         # Update the item to show it's paused
         self._update_queue_item_status(paused_item, "PAUSED", QColor(255, 215, 0), "(PAUSED)")
         
         # Add remaining items from saved queue
         if 'remaining_queue' in pause_state and isinstance(pause_state['remaining_queue'], list):
-            for item_text in pause_state['remaining_queue']:
-                if item_text != current_item_text:
-                    self.queue_manager.add_formatted_item_to_queue(item_text, queue_list_widget)
+            for item_data in pause_state['remaining_queue']:
+                # Extract item text for comparison
+                item_text = item_data['name'] if isinstance(item_data, dict) else item_data
+                current_text = current_item_data['name'] if isinstance(current_item_data, dict) else current_item_data
+                
+                if item_text != current_text:
+                    self.queue_manager.add_formatted_item_to_queue(item_data, queue_list_widget)
         
         # Restore state
         self.current_item = pause_state['current_item']
@@ -244,12 +291,13 @@ class AppController(QObject):
         if self.is_paused:
             # Get remaining queue items
             remaining_items = []
-            for i in range(queue_list_widget.count()):
-                item = queue_list_widget.item(i)
-                if item.data(Qt.UserRole):
-                    remaining_items.append(item.data(Qt.UserRole))
-                else:
-                    remaining_items.append(item.text())
+            for i in range(queue_list_widget.topLevelItemCount()):
+                item = queue_list_widget.topLevelItem(i)
+                item_data = {
+                    'name': item.data(0, Qt.UserRole) if item.data(0, Qt.UserRole) else item.text(0),
+                    'size': item.text(1)
+                }
+                remaining_items.append(item_data)
             
             StateManager.save_pause_state(
                 self.current_item,
@@ -268,7 +316,7 @@ class AppController(QObject):
         try:
             # Download the file
             self.current_operation = 'download'
-            file_path = self.download_manager.download_item_by_platform(platform_id, filename, queue_position)
+            file_path = self.download_manager.download_item_by_platform(platform_id, filename, queue_position, queue_item)
             
             if self.is_paused:
                 return
@@ -304,26 +352,29 @@ class AppController(QObject):
                 self.output_window.append(f"({queue_position}) Warning: Could not delete zip file: {e}")
         
         # Process based on platform with queue item for status updates
+        # Get current size from queue item to preserve it
+        current_size = queue_item.text(1) if queue_item.text(1) else None
+        
+        # Process based on platform with queue item for status updates
         if platform_id == 'ps3':
-            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128))
+            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128), size=current_size)
             self.processing_manager.process_ps3_files(extracted_files, base_name, queue_position, settings, queue_item)
         elif platform_id == 'psn':
-            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128))
+            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128), size=current_size)
             self.processing_manager.process_psn_files(extracted_files, base_name, queue_position, settings, queue_item)
         elif platform_id == 'ps2':
-            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128))
+            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128), size=current_size)
             self.processing_manager.process_ps2_files(extracted_files, base_name, queue_position, settings, queue_item)
         elif platform_id == 'psx':
-            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128))
+            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128), size=current_size)
             self.processing_manager.process_psx_files(extracted_files, base_name, queue_position, settings, queue_item)
         elif platform_id == 'psp':
-            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128))
+            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128), size=current_size)
             self.processing_manager.process_psp_files(extracted_files, base_name, queue_position, settings, queue_item)
         else:
             # All other platforms (including Xbox 360 variants) use generic processing
-            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128))
+            self._update_queue_item_status(queue_item, "PROCESSING", QColor(128, 0, 128), size=current_size)
             self.processing_manager.process_generic_files(extracted_files, base_name, queue_position, platform_id, settings, queue_item)
-        
         # Mark as completed
         self._update_queue_item_status(queue_item, "COMPLETED", QColor(0, 128, 0))
     
@@ -383,24 +434,46 @@ class AppController(QObject):
             self.output_window.append(f"Error handling download removal: {str(e)}\n")
             return True
     
-    def _update_queue_item_status(self, item, status, color, suffix=None):
+    def _update_queue_item_status(self, item, status, color, suffix=None, size=None):
         """Update queue item with status and formatting."""
         from PyQt5.QtGui import QFont
         
+        # Update the text in first column
         if suffix:
-            text = f"{item.data(Qt.UserRole)} {suffix}"
+            text = f"{item.data(0, Qt.UserRole)} {suffix}"
         else:
-            original_text = item.data(Qt.UserRole)
+            original_text = item.data(0, Qt.UserRole)
             clean_text = re.sub(r' \([A-Z]+\)$', '', original_text)
             text = f"{clean_text} ({status})"
         
-        item.setText(text)
+        # Handle size parameter - can be None, string, or int
+        if size is None:
+            # Keep existing size
+            current_size = item.text(1)
+        elif isinstance(size, str):
+            # Use provided string directly
+            current_size = size
+        elif isinstance(size, int):
+            # Format the size from bytes
+            current_size = self._format_file_size(size)
+        else:
+            # Fallback to existing size
+            current_size = item.text(1)
         
-        # Apply bold font and color
+        # Update both columns
+        item.setText(0, text)
+        item.setText(1, current_size)
+        
+        # Apply bold font and color to both columns
         font = QFont()
         font.setBold(True)
-        item.setFont(font)
-        item.setForeground(QBrush(color))
+        item.setFont(0, font)
+        item.setFont(1, font)
+        item.setForeground(0, QBrush(color))
+        item.setForeground(1, QBrush(color))
+        
+        # Store current state for pause/resume
+        item.setData(0, Qt.UserRole + 1, {'status': status, 'size': current_size})
     
     def _on_download_paused(self):
         """Handle download paused signal."""
@@ -416,11 +489,11 @@ class AppController(QObject):
             if status == "UNZIPPING":
                 self._update_queue_item_status(self.current_queue_item, "UNZIPPING", QColor(255, 165, 0))
             elif status == "DECRYPTING":
-                self._update_queue_item_status(self.current_queue_item, "DECRYPTING", QColor(255, 69, 0))
+                self._update_queue_item_status(self.current_queue_item, "DECRYPTING", QColor(255, 69, 0), size=None)
             elif status == "EXTRACTING":
-                self._update_queue_item_status(self.current_queue_item, "EXTRACTING", QColor(50, 205, 50))
+                self._update_queue_item_status(self.current_queue_item, "EXTRACTING", QColor(50, 205, 50), size=None)
             elif status == "SPLITTING":
-                self._update_queue_item_status(self.current_queue_item, "SPLITTING", QColor(255, 140, 0))
+                self._update_queue_item_status(self.current_queue_item, "SPLITTING", QColor(255, 140, 0), size=None)
     
     def _on_processing_paused(self):
         """Handle processing paused signal."""

@@ -2,14 +2,15 @@ import os
 import signal
 import re
 import sys
+import json
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLineEdit, QListWidget, QLabel, QCheckBox,
+    QPushButton, QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel, QCheckBox,
     QFileDialog, QDialog, QGroupBox, QProgressBar, QTabWidget, QAbstractItemView,
-    QMessageBox, QListWidgetItem, QFormLayout, QDialogButtonBox, QGridLayout,
+    QMessageBox, QListWidget, QListWidgetItem, QFormLayout, QDialogButtonBox, QGridLayout,
     QSplitter, QFrame, QSizePolicy, QComboBox
 )
-from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop # Removed QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop, QTimer # Removed QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QFont, QBrush, QColor
 
 from gui.output_window import OutputWindow
@@ -18,24 +19,202 @@ from core.config_manager import ConfigManager
 from threads.download_threads import GetSoftwareListThread
 
 
+class QueueTreeWidgetItem(QTreeWidgetItem):
+    """Custom tree widget item with inline move buttons."""
+    
+    def __init__(self, columns, parent_widget=None):
+        super().__init__(columns)
+        self.parent_widget = parent_widget
+        self.up_button = None
+        self.down_button = None
+        self.buttons_created = False
+    
+    def create_buttons(self, tree_widget):
+        """Create inline move buttons for this item."""
+        if self.buttons_created:
+            return
+            
+        # Create mini buttons with styling
+        self.up_button = QPushButton("↑")
+        self.up_button.setMaximumSize(20, 20)
+        self.up_button.setMinimumSize(20, 20)
+        self.up_button.clicked.connect(lambda: self.parent_widget.move_queue_item_up_inline(self))
+        
+        self.down_button = QPushButton("↓")
+        self.down_button.setMaximumSize(20, 20)
+        self.down_button.setMinimumSize(20, 20)
+        self.down_button.clicked.connect(lambda: self.parent_widget.move_queue_item_down_inline(self))
+        
+        # Apply button styling for enabled/disabled states
+        button_style = """
+            QPushButton {
+                border: 1px solid #555;
+                border-radius: 3px;
+                background-color: #666;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover:enabled {
+                background-color: #777;
+                border-color: #888;
+            }
+            QPushButton:pressed:enabled {
+                background-color: #555;
+            }
+            QPushButton:disabled {
+                background-color: #333;
+                color: #666;
+                border-color: #444;
+            }
+        """
+        
+        self.up_button.setStyleSheet(button_style)
+        self.down_button.setStyleSheet(button_style)
+        
+        # Create container widget for buttons
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(2, 2, 2, 2)
+        button_layout.setSpacing(1)
+        button_layout.addWidget(self.up_button)
+        button_layout.addWidget(self.down_button)
+        
+        # Set the widget in the third column
+        tree_widget.setItemWidget(self, 2, button_widget)
+        self.buttons_created = True
+        
+        # Update button states
+        self.update_button_states(tree_widget)
+    
+    def update_button_states(self, tree_widget):
+        """Update button enabled state based on position."""
+        if not self.buttons_created:
+            return
+            
+        # Check if buttons still exist (they may have been deleted during item moves)
+        try:
+            if not self.up_button or not self.down_button:
+                return
+                
+            current_index = tree_widget.indexOfTopLevelItem(self)
+            total_items = tree_widget.topLevelItemCount()
+            
+            # Up button: disabled if at the top (index 0)
+            self.up_button.setEnabled(current_index > 0)
+            
+            # Down button: disabled if at the bottom (last index)
+            self.down_button.setEnabled(current_index < total_items - 1)
+            
+        except RuntimeError:
+            # Buttons have been deleted - mark as needing recreation
+            self.buttons_created = False
+            self.up_button = None
+            self.down_button = None
+
+
+class SortableTreeWidgetItem(QTreeWidgetItem):
+    """Custom QTreeWidgetItem that sorts file sizes numerically."""
+    
+    def __lt__(self, other):
+        """Custom sorting logic for file sizes."""
+        column = self.treeWidget().sortColumn()
+        
+        if column == 1:  # Size column - sort numerically
+            size1 = self._size_to_bytes(self.text(1))
+            size2 = self._size_to_bytes(other.text(1))
+            return size1 < size2
+        else:  # Name column or others - sort alphabetically
+            return self.text(column).lower() < other.text(column).lower()
+    
+    def _size_to_bytes(self, size_text):
+        """Convert size string to bytes for numerical sorting."""
+        if not size_text or size_text.strip() == '':
+            return 0
+        
+        try:
+            # Remove extra whitespace and convert to uppercase
+            size_text = size_text.strip().upper()
+            
+            # Handle edge cases
+            if size_text in ['', '-', 'N/A', 'UNKNOWN']:
+                return 0
+            
+            # Extract number and unit using regex
+            import re
+            match = re.match(r'([0-9,]+\.?[0-9]*)\s*([A-Z]*)', size_text)
+            if not match:
+                return 0
+            
+            number_str = match.group(1).replace(',', '')
+            unit = match.group(2)
+            
+            try:
+                number = float(number_str)
+            except ValueError:
+                return 0
+            
+            # Convert to bytes based on unit
+            multipliers = {
+                'B': 1,
+                'KB': 1000,
+                'MB': 1000 ** 2,
+                'GB': 1000 ** 3,
+                'TB': 1000 ** 4,
+                'KIB': 1024,
+                'MIB': 1024 ** 2,
+                'GIB': 1024 ** 3,
+                'TIB': 1024 ** 4
+            }
+            
+            multiplier = multipliers.get(unit, 1)
+            return int(number * multiplier)
+            
+        except Exception:
+            return 0
+
+
 class GUIDownloader(QWidget):
     """The main GUI window for the Myrient Downloader application."""
     
     def __init__(self):
-        super().__init__()
+        try:
+            super().__init__()
+            self.setAttribute(Qt.WA_DeleteOnClose)  # Ensure cleanup on close
+            
+            # Initialize output window first
+            self.output_window = OutputWindow(self)
+            if not self.output_window:
+                raise RuntimeError("Failed to create output window")
+            self.output_window.set_as_stdout()
+            
+            # Initialize core components
+            self.config_manager = ConfigManager()
+            if not self.config_manager:
+                raise RuntimeError("Failed to initialize ConfigManager")
+            
+            # Initialize managers
+            self.settings_manager = SettingsManager(config_manager=self.config_manager)
+            if not self.settings_manager:
+                raise RuntimeError("Failed to initialize SettingsManager")
+            
+            # Initialize the rest of the application
+            self._init_application()
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            QMessageBox.critical(
+                None,
+                "Initialization Error",
+                f"Failed to initialize application:\n\n{str(e)}\n\nSee logs for details."
+            )
+            print(f"Initialization error:\n{error_details}")
+            raise  # Re-raise to let main() handle cleanup
+    
+    def _init_application(self):
+        """Initialize the rest of the application after basic setup."""
         
-        # Removed animation-related attributes
-        # self.output_animation = None
-        # self.is_output_visible = False
-
-        # Create output window first to capture all output
-        self.output_window = OutputWindow(self)
-        self.output_window.set_as_stdout()  # Redirect stdout early in initialization
-        
-        # Initialize configuration manager first
-        self.config_manager = ConfigManager()
-        
-        # Pass config_manager to SettingsManager to avoid duplicate initialization
+        # Pass config_manager to SettingsManager
         self.settings_manager = SettingsManager(config_manager=self.config_manager)
         
         # Initialize AppController
@@ -50,38 +229,60 @@ class GUIDownloader(QWidget):
         # Get platforms from configuration
         self.platforms = self.config_manager.get_platforms()
         
-        # Load software lists
+        # Set up signal handler
+        def signal_handler(signum, frame):
+            try:
+                if hasattr(self, 'output_window'):
+                    self.output_window.restore_stdout()
+                self.close()
+            except Exception:
+                sys.exit(1)
+        
+        if hasattr(signal, 'SIGINT'):
+            signal.signal(signal.SIGINT, signal_handler)
+        
+        # Initialize UI and components
         self.init_software_lists()
-        
-        # Initialize the UI
         self.initUI()
-        
-        # Load the queue and check for paused downloads
         self._setup_queue()
-        
-        # Add signal handler for SIGINT
-        signal.signal(signal.SIGINT, self.closeEvent)
-        
-        # Connect AppController signals
         self._connect_app_controller_signals()
     
     def _setup_queue(self):
         """Setup the queue and check for paused downloads."""
-        # Load the queue using AppController
-        queue_items = self.app_controller.load_queue()
+        # Load the queue using AppController - this returns full queue data
+        queue_data = self.app_controller.queue_manager.load_queue()
         
-        # Add items to the queue list using AppController's queue manager
-        for item_text in queue_items:
-            self.app_controller.queue_manager.add_formatted_item_to_queue(item_text, self.queue_list)
+        # Add items to the queue tree using AppController's queue manager
+        for item_data in queue_data:
+            # Ensure item_data is in the correct format
+            if isinstance(item_data, dict):
+                self.app_controller.queue_manager.add_formatted_item_to_queue(item_data, self.queue_list)
+            else:
+                # Convert old format to new format
+                item_dict = {'name': item_data, 'size': ''}
+                self.app_controller.queue_manager.add_formatted_item_to_queue(item_dict, self.queue_list)
+            
+        # Adjust column widths after adding items
+        self.queue_list.header().setStretchLastSection(False)  # Disable auto-stretch
+        total_width = self.queue_list.viewport().width()
+        self.queue_list.header().resizeSection(0, int(total_width * 0.8))  # Name column 80%
+        self.queue_list.header().resizeSection(1, int(total_width * 0.2))  # Size column 20%
         
         # If queue is empty, clear any stale pause state
-        if self.queue_list.count() == 0:
+        if self.queue_list.topLevelItemCount() == 0:
             from core.state_manager import StateManager
             StateManager.clear_pause_state()
         
         # Check if we need to resume a paused download
         if self.app_controller.check_for_paused_download(self.queue_list):
             self.start_pause_button.setText('Resume')
+        
+        # Update queue item sizes asynchronously if any are missing
+        try:
+            if self.queue_list.topLevelItemCount() > 0:
+                self.app_controller.queue_manager.update_queue_item_sizes_async(self.queue_list)
+        except Exception as e:
+            print(f"Error updating queue sizes: {e}")
 
     def _connect_app_controller_signals(self):
         """Connect AppController signals to GUI updates."""
@@ -105,21 +306,52 @@ class GUIDownloader(QWidget):
             self.platform_lists[platform_id] = ['Loading... this will take a moment']
         
         # Start threads to download software lists
+        # Set fetch_sizes=True to enable the new optimized file size fetching
+        fetch_file_sizes = True  # Uses optimized batch processing for fast startup
+        
         for platform_id, data in self.platforms.items():
             json_filename = f"{platform_id}_filelist.json"
             thread = self.load_software_list(
                 data['url'],
                 json_filename,
-                lambda items, pid=platform_id: self.set_platform_list(pid, items)
+                lambda items, pid=platform_id: self.set_platform_list(pid, items),
+                fetch_sizes=fetch_file_sizes
             )
             self.platform_threads[platform_id] = thread
             thread.start()
 
-    def load_software_list(self, url, json_filename, setter):
+    def load_software_list(self, url, json_filename, setter, fetch_sizes=True):
         """Create and return a thread to load a software list."""
-        thread = GetSoftwareListThread(url, json_filename)
+        thread = GetSoftwareListThread(url, json_filename, fetch_sizes)
         thread.signal.connect(setter)
         return thread
+    
+    def _populate_platform_tree(self, tree_widget, items):
+        """Populate a platform tree widget with file data (names and sizes)."""
+        tree_widget.clear()
+        
+        # Handle loading state
+        if isinstance(items, list) and len(items) == 1 and isinstance(items[0], str):
+            if "Loading..." in items[0]:
+                item = QTreeWidgetItem(['Loading... this will take a moment', ''])
+                tree_widget.addTopLevelItem(item)
+                return
+            elif "Error loading" in items[0]:
+                item = QTreeWidgetItem([items[0], ''])
+                tree_widget.addTopLevelItem(item)
+                return
+        
+        # Load file data - sizes will be loaded from JSON in set_platform_list_with_sizes
+        for filename in items:
+            if isinstance(filename, str):
+                item = SortableTreeWidgetItem([filename, ''])  # Size will be populated later
+                tree_widget.addTopLevelItem(item)
+    
+    def _get_cached_file_size(self, filename):
+        """Get cached file size for a filename from the JSON data."""
+        # This is a basic implementation - sizes will be loaded when platforms are loaded
+        # For now, return empty string as sizes will be populated from the JSON data
+        return ''
     
     def set_platform_list(self, platform_id, items):
         """Set the list of items for a specific platform."""
@@ -128,9 +360,54 @@ class GUIDownloader(QWidget):
         # Find the correct tab index for this platform and update it
         for i in range(self.result_list.count()):
             if self.result_list.tabText(i) == self.platforms[platform_id]['tab_name']:
-                self.result_list.widget(i).clear()
-                self.result_list.widget(i).addItems(items)
+                tree_widget = self.result_list.widget(i)
+                self._populate_platform_tree_with_sizes(tree_widget, items, platform_id)
                 break
+    
+    def _populate_platform_tree_with_sizes(self, tree_widget, items, platform_id):
+        """Populate a platform tree widget with file data and sizes from JSON."""
+        tree_widget.clear()
+        
+        # Handle loading state
+        if isinstance(items, list) and len(items) == 1 and isinstance(items[0], str):
+            if "Loading..." in items[0]:
+                item = SortableTreeWidgetItem(['Loading... this will take a moment', ''])
+                tree_widget.addTopLevelItem(item)
+                return
+            elif "Error loading" in items[0]:
+                item = SortableTreeWidgetItem([items[0], ''])
+                tree_widget.addTopLevelItem(item)
+                return
+        
+        # Load sizes from JSON cache
+        file_sizes = self._load_file_sizes_from_json(platform_id)
+        
+        # Populate tree with files and sizes
+        for filename in items:
+            if isinstance(filename, str):
+                size = file_sizes.get(filename, '')
+                item = SortableTreeWidgetItem([filename, size])
+                tree_widget.addTopLevelItem(item)
+    
+    def _load_file_sizes_from_json(self, platform_id):
+        """Load file sizes from JSON cache for a specific platform."""
+        file_sizes = {}
+        try:
+            json_file = f"config/{platform_id}_filelist.json"
+            if os.path.exists(json_file):
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and data:
+                        if isinstance(data[0], dict):
+                            # New format with sizes
+                            for item in data:
+                                name = item.get('name')
+                                size = item.get('size', '')
+                                if name:
+                                    file_sizes[name] = size
+        except Exception as e:
+            print(f"Error loading file sizes for {platform_id}: {e}")
+        return file_sizes
 
     def initUI(self):
         """Initialize the user interface."""
@@ -208,13 +485,37 @@ class GUIDownloader(QWidget):
         # Create result list (software tabs)
         self.result_list = QTabWidget()
         
-        # Create tabs based on the platforms configuration
+        # Create tabs based on the platforms configuration - using QTreeWidget for file sizes
         for platform_id, data in self.platforms.items():
-            list_widget = QListWidget()
-            list_widget.addItems(self.platform_lists[platform_id])
-            list_widget.itemSelectionChanged.connect(self.update_add_to_queue_button)
-            list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-            self.result_list.addTab(list_widget, data['tab_name'])
+            tree_widget = QTreeWidget()
+            tree_widget.setColumnCount(2)
+            tree_widget.setHeaderLabels(['Name', 'Size'])
+            
+            # Configure columns
+            header = tree_widget.header()
+            header.setSectionsMovable(False)
+            header.setStretchLastSection(False)
+            header.setSectionResizeMode(0, header.ResizeMode.Stretch)  # Name column stretches
+            header.setSectionResizeMode(1, header.ResizeMode.Fixed)    # Size column fixed
+            tree_widget.setColumnWidth(1, 100)  # Fixed width for size column
+            
+            # Enable sorting
+            tree_widget.setSortingEnabled(True)
+            tree_widget.sortByColumn(0, Qt.AscendingOrder)  # Default sort by name
+            
+            # Set sorting indicator to be visible
+            tree_widget.header().setSortIndicatorShown(True)
+            
+            tree_widget.setAllColumnsShowFocus(True)
+            tree_widget.setUniformRowHeights(True)
+            tree_widget.setRootIsDecorated(False)  # No tree indicators
+            
+            # Add initial items
+            self._populate_platform_tree(tree_widget, self.platform_lists[platform_id])
+            
+            tree_widget.itemSelectionChanged.connect(self.update_add_to_queue_button)
+            tree_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+            self.result_list.addTab(tree_widget, data['tab_name'])
         
         self.result_list.currentChanged.connect(self.update_add_to_queue_button)
         self.result_list.currentChanged.connect(self.update_checkboxes_for_platform)
@@ -241,21 +542,52 @@ class GUIDownloader(QWidget):
         queue_header.setStyleSheet("font-weight: bold; font-size: 14px;")
         queue_layout.addWidget(queue_header)
         
-        # Queue list
-        self.queue_list = QListWidget()
-        self.queue_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        # Queue list with columns
+        self.queue_list = QTreeWidget()
+        self.queue_list.setColumnCount(3)
+        self.queue_list.setHeaderLabels(['Name', 'Size', 'Actions'])
+        
+        # Configure column properties
+        header = self.queue_list.header()
+        header.setSectionsMovable(False)  # Prevent column reordering
+        header.setStretchLastSection(False)  # Don't stretch last column
+        # Set column widths: Name (stretch), Size (fixed), Actions (fixed for buttons)
+        self.queue_list.setColumnWidth(1, 80)   # Size column
+        self.queue_list.setColumnWidth(2, 50)   # Actions column for buttons
+        header.setSectionResizeMode(0, header.ResizeMode.Stretch)  # Name column stretches
+        header.setSectionResizeMode(1, header.ResizeMode.Fixed)    # Size column fixed width
+        header.setSectionResizeMode(2, header.ResizeMode.Fixed)    # Actions column fixed width
+        
+        # Disable sorting for queue to preserve manual ordering
+        self.queue_list.setSortingEnabled(False)
+        self.queue_list.header().setSortIndicatorShown(False)
+        
+        self.queue_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button)
+        self.queue_list.setAllColumnsShowFocus(True)  # Show focus across all columns
         self.queue_list.setWordWrap(True)
         self.queue_list.setMinimumHeight(150)
+        self.queue_list.setUniformRowHeights(True)
         self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.queue_list.setResizeMode(QListWidget.Adjust)
+        self.queue_list.header().setStretchLastSection(False)
+        # Set initial column sizes
+        header = self.queue_list.header()
+        total_width = self.queue_list.viewport().width()
+        header.resizeSection(0, int(total_width * 0.7))  # Name column 70%
+        header.resizeSection(1, int(total_width * 0.2))  # Size column 20%
+        header.resizeSection(2, int(total_width * 0.1))  # Actions column 10%
         queue_layout.addWidget(self.queue_list)
+        
+        # Queue control buttons (only remove button now)
+        queue_buttons_layout = QHBoxLayout()
         
         # Remove from queue button
         self.remove_from_queue_button = QPushButton('Remove from Queue')
         self.remove_from_queue_button.clicked.connect(self.remove_from_queue)
         self.remove_from_queue_button.setEnabled(False)
-        queue_layout.addWidget(self.remove_from_queue_button)
+        queue_buttons_layout.addWidget(self.remove_from_queue_button)
+        
+        queue_layout.addLayout(queue_buttons_layout)
         
         # Add both widgets to the splitter
         top_splitter.addWidget(software_widget)
@@ -396,14 +728,17 @@ class GUIDownloader(QWidget):
         output_layout = QVBoxLayout(output_frame)
         output_layout.setContentsMargins(5, 5, 5, 5)
         
-        # Header with toggle button is now created and placed in initUI
-        
-        # Output window (initially hidden)
+        # Configure output window
         self.output_window.setMinimumHeight(200)
         self.output_window.setMaximumHeight(400)
-        self.output_window.setVisible(False)      # Content area is initially hidden
+        
+        # Add to layout and set initial visibility
         output_layout.addWidget(self.output_window)
-        output_frame.setVisible(False)            # Frame itself is initially hidden
+        self.output_window.setVisible(False)
+        output_frame.setVisible(False)
+        
+        # Store frame for later access
+        self.output_frame = output_frame
         
         return output_frame
 
@@ -805,11 +1140,7 @@ class GUIDownloader(QWidget):
             
             def is_world_release(item):
                 """Check if item is a World release."""
-                return has_exact_region(item, "World")
-            
-            def is_world_release(item):
-                """Check if item is a World release."""
-                return "(world)" in item.lower()
+                return "(world)" in item.lower() or has_exact_region(item, "World")
             
             # Apply region filter if any regions are selected
             if selected_regions:
@@ -880,18 +1211,22 @@ class GUIDownloader(QWidget):
                         if any(has_exact_region(item, region) for region in selected_regions)
                     ]
             
-            # Clear the current list widget and add the filtered items
-            current_list_widget = self.result_list.currentWidget()
-            current_list_widget.clear()
-            current_list_widget.addItems(filtered_list)
+            # Clear the current tree widget and add the filtered items
+            current_tree_widget = self.result_list.currentWidget()
+            self._populate_platform_tree_with_sizes(current_tree_widget, filtered_list, current_platform)
     
     def update_add_to_queue_button(self):
         """Enable or disable the add to queue button based on selection."""
-        self.add_to_queue_button.setEnabled(bool(self.result_list.currentWidget().selectedItems()))
+        current_widget = self.result_list.currentWidget()
+        if current_widget:
+            self.add_to_queue_button.setEnabled(bool(current_widget.selectedItems()))
+        else:
+            self.add_to_queue_button.setEnabled(False)
 
     def update_remove_from_queue_button(self):
         """Enable or disable the remove from queue button based on selection."""
-        self.remove_from_queue_button.setEnabled(bool(self.queue_list.selectedItems()))
+        selected = self.queue_list.selectedItems()
+        self.remove_from_queue_button.setEnabled(bool(selected))
     
     def add_to_queue(self):
         """Add selected items to the download queue."""
@@ -901,11 +1236,21 @@ class GUIDownloader(QWidget):
         
         if 0 <= current_tab < len(platform_ids):
             current_platform = platform_ids[current_tab]
+            
+            # Create adapter objects for tree widget items to work with app controller
+            class TreeItemAdapter:
+                def __init__(self, tree_item):
+                    self.tree_item = tree_item
+                def text(self):
+                    return self.tree_item.text(0)  # Return first column text
+            
+            adapted_items = [TreeItemAdapter(item) for item in selected_items]
             added_count = self.app_controller.add_to_queue(
-                selected_items, current_platform, self.platforms, self.queue_list
+                adapted_items, current_platform, self.platforms, self.queue_list
             )
             
-            # Removed "Added x items to queue" output to clean up logs
+            # Update all button states after adding items
+            self.update_all_queue_button_states()
     
     def remove_from_queue(self):
         """Remove selected items from the download queue."""
@@ -913,10 +1258,94 @@ class GUIDownloader(QWidget):
         if not selected_items:
             return
         
+        # No need for conversion since AppController now handles QTreeWidgetItems directly
         removed_count = self.app_controller.remove_from_queue(selected_items, self.queue_list)
         
-        # Update button state
+        # Update button states for all remaining items
         self.update_remove_from_queue_button()
+        self.update_all_queue_button_states()
+    
+    def move_queue_item_up_inline(self, item):
+        """Move the specified queue item up one position (called from inline buttons)."""
+        if not item:
+            return
+            
+        current_index = self.queue_list.indexOfTopLevelItem(item)
+        
+        if current_index > 0:
+            # Take the item out and insert it one position up
+            taken_item = self.queue_list.takeTopLevelItem(current_index)
+            self.queue_list.insertTopLevelItem(current_index - 1, taken_item)
+            
+            # Reselect the moved item
+            self.queue_list.setCurrentItem(taken_item)
+            
+            # Save the queue with new order
+            self.app_controller.save_queue(self.queue_list)
+            
+            # Recreate buttons for all items and update their states
+            self.recreate_all_queue_buttons()
+    
+    def move_queue_item_down_inline(self, item):
+        """Move the specified queue item down one position (called from inline buttons)."""
+        if not item:
+            return
+            
+        current_index = self.queue_list.indexOfTopLevelItem(item)
+        total_items = self.queue_list.topLevelItemCount()
+        
+        if current_index < total_items - 1:
+            # Take the item out and insert it one position down
+            taken_item = self.queue_list.takeTopLevelItem(current_index)
+            self.queue_list.insertTopLevelItem(current_index + 1, taken_item)
+            
+            # Reselect the moved item
+            self.queue_list.setCurrentItem(taken_item)
+            
+            # Save the queue with new order
+            self.app_controller.save_queue(self.queue_list)
+            
+            # Recreate buttons for all items and update their states
+            self.recreate_all_queue_buttons()
+
+    def update_all_queue_button_states(self):
+        """Update button states for all queue items."""
+        for i in range(self.queue_list.topLevelItemCount()):
+            item = self.queue_list.topLevelItem(i)
+            if hasattr(item, 'update_button_states'):
+                try:
+                    item.update_button_states(self.queue_list)
+                except RuntimeError:
+                    # Button was deleted, skip this item
+                    continue
+    
+    def recreate_all_queue_buttons(self):
+        """Recreate buttons for all queue items after moves."""
+        for i in range(self.queue_list.topLevelItemCount()):
+            item = self.queue_list.topLevelItem(i)
+            if hasattr(item, 'create_buttons'):
+                # Always reset and recreate buttons after a move operation
+                # because takeTopLevelItem/insertTopLevelItem destroys widgets
+                item.buttons_created = False
+                item.up_button = None
+                item.down_button = None
+                item.create_buttons(self.queue_list)
+                # Ensure button states are updated after creation
+                item.update_button_states(self.queue_list)
+
+    def move_queue_item_up(self):
+        """Move the selected queue item up one position (legacy method for compatibility)."""
+        selected = self.queue_list.selectedItems()
+        if len(selected) != 1:
+            return
+        self.move_queue_item_up_inline(selected[0])
+    
+    def move_queue_item_down(self):
+        """Move the selected queue item down one position (legacy method for compatibility)."""
+        selected = self.queue_list.selectedItems()
+        if len(selected) != 1:
+            return
+        self.move_queue_item_down_inline(selected[0])
     
     def open_settings(self):
         """Open the settings dialog."""
@@ -926,41 +1355,26 @@ class GUIDownloader(QWidget):
             # Optionally, update directories on disk if changed
             self.settings_manager.create_directories()
     
-    
-
-    def toggle_region_filter(self):
-        """Toggle visibility of the region filter group."""
-        is_visible = self.region_filter_group.isVisible()
-        self.region_filter_group.setVisible(not is_visible)
-        self.filters_button.setChecked(not is_visible)
-    
-    def toggle_region_filter(self):
-        """Toggle visibility of the region filter group."""
-        is_visible = self.region_filter_group.isVisible()
-        self.region_filter_group.setVisible(not is_visible)
-        self.filters_button.setChecked(not is_visible)
 
     def closeEvent(self, event):
         """Handle the close event."""
         try:
-            # Save pause state and queue using AppController
-            self.app_controller.save_pause_state(self.queue_list)
+            # Restore stdout first to ensure we can see any errors
+            if hasattr(self, 'output_window'):
+                self.output_window.restore_stdout()
+                
+            # Try to save state if we have an app controller
+            if hasattr(self, 'app_controller'):
+                self.app_controller.save_pause_state(self.queue_list)
             
             # Stop all threads
             self._stop_all_threads()
-            
-            # Restore stdout/stderr to their original values
-            if hasattr(self, 'output_window'):
-                self.output_window.restore_stdout()
-            
         except Exception as e:
             print(f"Error during shutdown: {str(e)}")
-            
-        event.accept()
-        
-        # Schedule application quit after a short delay to allow cleanup
-        from PyQt5.QtCore import QTimer
-        QTimer.singleShot(100, QApplication.instance().quit)
+        finally:
+            # Always accept the event and schedule quit
+            event.accept()
+            QTimer.singleShot(100, QApplication.instance().quit)
     
     def _stop_all_threads(self):
         """Stop all running threads gracefully."""
@@ -1029,6 +1443,7 @@ class GUIDownloader(QWidget):
         self.settings_button.setEnabled(False)
         self.add_to_queue_button.setEnabled(False)
         self.remove_from_queue_button.setEnabled(False)
+        self.queue_list.setEnabled(False)  # Disable queue interaction including inline buttons
         self.decrypt_checkbox.setEnabled(False)
         self.split_checkbox.setEnabled(False)
         self.keep_dkey_checkbox.setEnabled(False)
@@ -1043,10 +1458,11 @@ class GUIDownloader(QWidget):
         """Enable specific controls during pause."""
         self.settings_button.setEnabled(True)
         self.remove_from_queue_button.setEnabled(True)
-        self.queue_list.setEnabled(True)
+        self.queue_list.setEnabled(True)  # Re-enable queue interaction including inline buttons
         
         # Allow selection in the queue list
-        self.queue_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        # Keep using ExtendedSelection for QTreeWidget
+        self.queue_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         
         # Update the remove from queue button state based on selection
         self.update_remove_from_queue_button()
@@ -1056,6 +1472,7 @@ class GUIDownloader(QWidget):
         self.settings_button.setEnabled(True)
         self.add_to_queue_button.setEnabled(True)
         self.remove_from_queue_button.setEnabled(True)
+        self.queue_list.setEnabled(True)  # Re-enable queue interaction including inline buttons
         self.decrypt_checkbox.setEnabled(True)
         self.split_checkbox.setEnabled(True)
         self.keep_dkey_checkbox.setEnabled(True)
@@ -1082,25 +1499,34 @@ class GUIDownloader(QWidget):
             'organize_content_to_folders': self.organize_content_checkbox.isChecked()
         }
 
+    def toggle_region_filter(self):
+        """Toggle visibility of the region filter group."""
+        if hasattr(self, 'region_filter_group') and self.region_filter_group:
+            is_visible = self.region_filter_group.isVisible()
+            self.region_filter_group.setVisible(not is_visible)
+            self.filters_button.setChecked(not is_visible)
+            
     def _on_queue_updated(self):
         """Handle queue update signal from AppController."""
-        # Update button states
-        self.update_add_to_queue_button()
-        self.update_remove_from_queue_button()
-
+        try:
+            self.update_add_to_queue_button()
+            self.update_remove_from_queue_button()
+        except Exception as e:
+            print(f"Error updating queue buttons: {e}")
+            
     def _on_operation_complete(self):
         """Handle operation complete signal from AppController."""
         # Re-enable all buttons
         self._enable_all_buttons()
         
-        # Clear download status labels
-        self.download_speed_label.setText("")
-        self.download_eta_label.setText("")
-        self.download_size_label.setText("")
+        # Clear status labels
+        self.download_speed_label.clear()
+        self.download_eta_label.clear()
+        self.download_size_label.clear()
+        self.progress_bar.setValue(0)
         
-        # Save the queue state (should be empty now) to clear the queue file
+        # Clear the queue file since processing is complete
         self.app_controller.save_queue(self.queue_list)
-
     def _on_operation_paused(self, item_name):
         """Handle operation paused signal from AppController."""
         self.start_pause_button.setText('Resume')
@@ -1112,5 +1538,3 @@ class GUIDownloader(QWidget):
         if not self.output_window.isVisible():
             self.toggle_output_window()
         self.output_window.append(f"ERROR: {error_message}")
-
-

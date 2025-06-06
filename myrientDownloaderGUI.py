@@ -2,6 +2,8 @@
 import sys
 import os
 import platform
+import traceback
+from traceback import format_exception
 
 # Import Qt core module first and set attributes before any other Qt imports
 from PyQt5.QtCore import Qt, QCoreApplication, QSettings
@@ -19,32 +21,6 @@ from core.settings import SettingsManager
 
 # Global settings for theme
 app_settings = None
-
-# Capture early output
-class OutputBuffer:
-    def __init__(self):
-        self.buffer = []
-        self.orig_stdout = sys.stdout
-        self.orig_stderr = sys.stderr
-    
-    def write(self, text):
-        self.buffer.append(text)
-        # Still write to original stdout for early debugging
-        self.orig_stdout.write(text)
-    
-    def flush(self):
-        pass
-    
-    def transfer_to_output(self, output_window):
-        for text in self.buffer:
-            output_window.append_text(text)
-        self.buffer = []
-        
-    # Add a method to properly handle stderr
-    def stderr_write(self, text):
-        """Write to the buffer and original stderr."""
-        self.buffer.append(text)
-        self.orig_stderr.write(text)
 
 def detect_system_dark_mode():
     """Simple detection of system dark mode preference."""
@@ -164,38 +140,59 @@ def validate_startup_prerequisites():
         return True  # Continue on validation errors
 
 
+def show_error_dialog(message, details=None):
+    """Show an error dialog with optional details."""
+    msg_box = QMessageBox()
+    msg_box.setIcon(QMessageBox.Critical)
+    msg_box.setWindowTitle("Error")
+    msg_box.setText(message)
+    if details:
+        msg_box.setDetailedText(details)
+    msg_box.exec_()
+
 def main():
     """Main entry point for the application."""
-    
-    # Create output buffer to capture early messages
-    buffer = OutputBuffer()
-    sys.stdout = buffer
-    sys.stderr = buffer
-    
-    # Detect Wayland environment and apply necessary fixes
-    if os.environ.get("XDG_SESSION_TYPE") == "wayland":
-        print("Wayland session detected, applying compatibility settings")
-        # Force Qt to use x11 platform plugin for better compatibility
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
-        # Disable high DPI scaling which can cause rendering issues in dialogs
-        os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
-    
-    # Initialize application
-    app = QApplication(sys.argv)
-    
-    # Apply theme using simplified system
-    is_dark = apply_theme(app)
-    
-    # Validate startup prerequisites on Windows
-    validate_startup_prerequisites()  # We always continue now, regardless of the return value
-    
-    # Create main window
-    ex = GUIDownloader()
-    
-    # Transfer captured output to the application's output window
-    buffer.transfer_to_output(ex.output_window)
-    
-    sys.exit(app.exec_())
+    try:
+        # Set up global exception handler
+        def global_except_hook(exc_type, exc_value, exc_traceback):
+            error_details = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            print(error_details)  # Print to console/log
+            if QApplication.instance():
+                show_error_dialog("An unexpected error occurred", error_details)
+            sys.exit(1)
+        
+        sys.excepthook = global_except_hook
+        
+        # Initialize Qt application first
+        app = QApplication(sys.argv)
+        
+        # Apply theme settings
+        is_dark = apply_theme(app)
+        
+        # Detect Wayland and apply fixes
+        if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+            os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+        
+        # Run startup validation
+        validate_startup_prerequisites()
+        
+        # Create and show main window
+        window = GUIDownloader()
+        window.show()
+        
+        # Enter Qt event loop
+        return app.exec_()
+    except Exception as e:
+        error_details = "".join(traceback.format_exception(*sys.exc_info()))
+        print(f"Fatal error during startup: {error_details}")
+        if QApplication.instance():
+            show_error_dialog(
+                "Failed to start application",
+                f"Error: {str(e)}\n\nDetails:\n{error_details}"
+            )
+        return 1
 
 if __name__ == '__main__':
-    main()
+    result = main()
+    sys.exit(result)

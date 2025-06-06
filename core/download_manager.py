@@ -55,9 +55,48 @@ class DownloadManager(QObject):
         return False
 
     @staticmethod
+    def get_remote_file_size(url):
+        """Get the size of a remote file without downloading it."""
+        try:
+            # Set up headers to mimic a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive'
+            }
+            
+            # Try HEAD request first (faster)
+            response = requests.head(url, timeout=5, headers=headers, allow_redirects=True)
+            if response.status_code == 200 and 'content-length' in response.headers:
+                return int(response.headers['content-length'])
+            
+            # If HEAD fails, try GET with range to get just the headers
+            headers['Range'] = 'bytes=0-0'
+            response = requests.get(url, timeout=5, headers=headers, allow_redirects=True)
+            if response.status_code in [200, 206, 416] and 'content-range' in response.headers:
+                # Parse content-range header: "bytes 0-0/12345"
+                content_range = response.headers['content-range']
+                if '/' in content_range:
+                    total_size = content_range.split('/')[-1]
+                    if total_size.isdigit():
+                        return int(total_size)
+            elif response.status_code in [200, 206] and 'content-length' in response.headers:
+                return int(response.headers['content-length'])
+                
+        except Exception as e:
+            # Silently fail - too many files to print all errors
+            pass
+        return None
+
+    @staticmethod
     def build_download_url(base_url, filename):
         """Build a download URL by encoding the filename."""
-        encoded_filename = urllib.parse.quote(filename)
+        # Only encode if not already encoded
+        if '%' not in filename:
+            encoded_filename = urllib.parse.quote(filename)
+        else:
+            encoded_filename = filename
         # Ensure base_url does not end with a slash, as we add one.
         return f"{base_url.rstrip('/')}/{encoded_filename}"
 
@@ -119,7 +158,7 @@ class DownloadManager(QObject):
         """Get the base name of a file (without extension)."""
         return os.path.splitext(filename)[0]
         
-    def download_item_by_platform(self, platform_id, item_text, queue_position):
+    def download_item_by_platform(self, platform_id, item_text, queue_position, queue_item):
         """Download an item based on its platform and return the downloaded file path."""
         # Extract actual filename if this is a formatted queue item
         if '<b>' in item_text:
@@ -132,10 +171,11 @@ class DownloadManager(QObject):
             return None
         
         # Download the file
-        # Download the file
-        return self.download_file(item_text, queue_position, url)
+        # Download the file with queue item for size updates
+        self.current_queue_item = queue_item  # Store current queue item
+        return self.download_file(item_text, queue_position, url, queue_item)
     
-    def download_file(self, selected_iso_filename, queue_position, base_download_url_for_platform):
+    def download_file(self, selected_iso_filename, queue_position, base_download_url_for_platform, queue_item=None):
         """
         Helper function to download a file.
         `selected_iso_filename` is the name of the .zip file (e.g., "Game Name (Region).zip").
@@ -270,11 +310,21 @@ class DownloadManager(QObject):
         self.progress_updated.emit(0)
         self.size_updated.emit("")
         
+        # Get remote file size for initial display
+        try:
+            response = requests.head(download_url)
+            if 'content-length' in response.headers:
+                remote_size = int(response.headers['content-length'])
+                if queue_item:
+                    queue_item.setText(1, self._format_file_size(remote_size))
+        except Exception:
+            pass  # Ignore errors in size prefetch
+            
         self.download_thread = DownloadThread(download_url, zip_file_path) # Downloads to processing_dir
         self.download_thread.progress_signal.connect(self.progress_updated.emit)
         self.download_thread.speed_signal.connect(self.speed_updated.emit)
         self.download_thread.eta_signal.connect(self.eta_updated.emit)
-        self.download_thread.size_signal.connect(self.size_updated.emit)
+        self.download_thread.size_signal.connect(self._handle_size_update)
         self.download_thread.download_paused_signal.connect(self.download_paused.emit)
         
         # Create an event loop and wait for download to complete
@@ -308,6 +358,7 @@ class DownloadManager(QObject):
         """Stop the current download."""
         if self.download_thread:
             self.download_thread.stop()
+            self.current_queue_item = None  # Clear queue item reference
     
     def _get_filename_from_queue_item(self, item_text):
         """Extract filename from a formatted queue item."""
@@ -328,6 +379,7 @@ class DownloadManager(QObject):
         """Clear current operation state."""
         self.current_operation = None
         self.current_file_path = None
+        self.current_queue_item = None  # Clear queue item reference
     
     def reset_overwrite_choices(self):
         """Reset overwrite manager choices for new download session."""
@@ -347,3 +399,25 @@ class DownloadManager(QObject):
         except (OSError, IOError):
             pass  # Skip directories that can't be accessed
         return total_size
+        
+    def _handle_size_update(self, size_str):
+        """Handle size updates from download thread and update queue item."""
+        # Update the general size signal
+        self.size_updated.emit(size_str)
+        
+        # Update queue item if available
+        if hasattr(self, 'current_queue_item') and self.current_queue_item:
+            # Extract current size from format "X.XX MB/Y.YY MB"
+            current_size = size_str.split('/')[0].strip()
+            self.current_queue_item.setText(1, current_size)
+
+    def _format_file_size(self, size_bytes):
+        """Format file size for display."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes/1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes/(1024*1024):.1f} MB"
+        else:
+            return f"{size_bytes/(1024*1024*1024):.1f} GB"
