@@ -1082,7 +1082,7 @@ class SettingsDialog(QDialog):
         self.platforms = config_manager.get_platforms()
         
         self.setWindowTitle("Myrient Downloader Settings")
-        self.setMinimumWidth(900)
+        self.setMinimumWidth(700)
         
         # Dictionary to store all input widgets
         self.directory_inputs = {}
@@ -1091,8 +1091,8 @@ class SettingsDialog(QDialog):
         
         self.initUI()
         
-        # Calculate and set dynamic height after UI is built
-        self._calculate_and_set_dynamic_height()
+        # Adjust size to fit content dynamically
+        self.adjustSize()
     
     def initUI(self):
         """Initialize the UI components with tabbed interface."""
@@ -1400,54 +1400,6 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
         return widget
     
-    def _calculate_and_set_dynamic_height(self):
-        """Calculate and set the dialog height based on the number of settings."""
-        # Count the number of settings/groups that will be displayed
-        base_height = 200  # Base height for window chrome, buttons, tabs, etc.
-        
-        # Root configuration section (2 items)
-        settings_count = 2
-        
-        # PlayStation console directories (4 items)
-        settings_count += 4
-        
-        # PlayStation Network directories (2 items)
-        settings_count += 2
-        
-        # Count other gaming systems
-        if self.platforms:
-            other_platforms = {k: v for k, v in self.platforms.items()
-                             if k not in ['ps3', 'ps2', 'psx', 'psp', 'psn']}
-            settings_count += len(other_platforms)
-        
-        # Binary tools (2 items)
-        settings_count += 2
-        
-        # Calculate height based on number of settings
-        # Each setting row is approximately 40-50 pixels high
-        item_height = 45
-        group_header_height = 35  # Height for group box headers
-        group_padding = 20  # Padding within groups
-        
-        # Calculate total content height
-        num_groups = 4  # Root, PlayStation, PSN, Binary Tools
-        if self.platforms and any(k not in ['ps3', 'ps2', 'psx', 'psp', 'psn'] for k in self.platforms.keys()):
-            num_groups += 1  # Other gaming systems group exists
-        
-        content_height = (settings_count * item_height) + (num_groups * group_header_height) + (num_groups * group_padding)
-        
-        # Add base height and some buffer
-        total_height = base_height + content_height + 100  # 100px buffer
-        
-        # Set reasonable bounds
-        min_height = 600
-        max_height = 1000
-        
-        calculated_height = max(min_height, min(max_height, total_height))
-        
-        # Set the calculated height
-        self.setMinimumHeight(calculated_height)
-        self.resize(1000, calculated_height)
     
     def update_platform_directories_on_root_change(self):
         """Update platform directories when root directory changes."""
