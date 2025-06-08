@@ -376,7 +376,7 @@ class DownloadManager(QObject):
             self.download_thread = None
             self.current_queue_item = None  # Clear queue item reference
         else:
-            print("No download thread to stop")
+            pass  # No download thread to stop
         # Don't set is_paused here - let the app controller handle state
     
     def _get_filename_from_queue_item(self, item_text):

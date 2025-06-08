@@ -668,7 +668,6 @@ class DownloadThread(QThread):
                 self.download_complete_signal.emit()
 
     def stop(self):
-        print("Stopping download thread...")
         self.running = False
         self._stop_requested = True
         # If we're paused, resume to allow thread to exit

@@ -28,8 +28,6 @@ class StateManager:
         
         with open(StateManager.PAUSE_STATE_FILE, 'w') as f:
             json.dump(state, f)
-            
-        print(f"Pause state saved: {current_item} - {operation}")
     
     @staticmethod
     def load_pause_state():

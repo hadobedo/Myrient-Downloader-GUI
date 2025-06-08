@@ -376,7 +376,6 @@ class AppController(QObject):
         """Stop the current processing operation."""
         if force_stop:
             # During shutdown, don't set paused state - just stop everything
-            print("Force stopping all operations for shutdown...")
             self.is_shutting_down = True
             self.download_manager.stop_download()
             self.processing_manager.stop_processing()
@@ -510,7 +509,6 @@ class AppController(QObject):
                 self.total_items,
                 remaining_items
             )
-            print(f"Pause state saved: {self.current_item} - paused")
         else:
             StateManager.clear_pause_state()
     
@@ -679,8 +677,6 @@ class AppController(QObject):
             
             # Stop current operations if this was the active item
             if self.current_item == original_name:
-                print(f"Stopping operations for removed item: {original_name}")
-                
                 # Clear pause state if paused
                 if self.is_paused:
                     StateManager.clear_pause_state()
@@ -784,7 +780,7 @@ class AppController(QObject):
         if not self.is_shutting_down:
             self.operation_complete.emit()
         else:
-            print("Skipping operation_complete signal during shutdown")
+            pass  # Skip operation_complete signal during shutdown
     
     def filter_by_regions(self, items: List[str], selected_regions: List[str]) -> List[str]:
         """Filter items by multiple regions."""

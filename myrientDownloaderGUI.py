@@ -185,7 +185,6 @@ def apply_theme(app):
                 background-color: #484848;
             }
         """)
-        print("Applied dark theme with enhanced Linux/Wayland compatibility")
     else:
         # Use Qt's default light theme with some enhancements
         app.setStyle(QStyleFactory.create("Fusion"))
@@ -205,8 +204,7 @@ def apply_theme(app):
                 padding: 0 5px 0 5px;
             }
         """)
-        print("Applied light theme with enhancements")
-    
+
     return use_dark
 
 def show_styled_message_box(icon, title, text, parent=None):
@@ -269,7 +267,6 @@ def detect_wayland():
     is_wayland = any(wayland_indicators)
     
     if is_wayland:
-        print("Wayland session detected, applying Qt fixes...")
         # Force Qt to use X11 backend for better compatibility
         os.environ["QT_QPA_PLATFORM"] = "xcb"
         # Disable auto scaling which can cause issues on Wayland
@@ -280,7 +277,6 @@ def detect_wayland():
         # Force software rendering if needed
         if not os.environ.get("QT_QUICK_BACKEND"):
             os.environ["QT_QUICK_BACKEND"] = "software"
-        print("Applied Wayland compatibility settings")
     
     return is_wayland
 

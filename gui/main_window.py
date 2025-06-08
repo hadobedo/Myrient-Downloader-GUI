@@ -1377,8 +1377,6 @@ class GUIDownloader(QWidget):
                 
             # Stop any active downloads/processing first
             if hasattr(self, 'app_controller') and self.app_controller:
-                print("Stopping application controller operations...")
-                
                 # Check if user had manually paused before closing
                 was_paused_before_shutdown = self.app_controller.is_paused
                 
@@ -1388,9 +1386,8 @@ class GUIDownloader(QWidget):
                 try:
                     if hasattr(self, 'queue_list') and self.queue_list:
                         if was_paused_before_shutdown:
-                            # User had paused manually, so save pause state for resume
-                            print("Saving pause state (user had paused before closing)...")
-                            self.app_controller.save_pause_state(self.queue_list, force_save=True)
+                                                        # User had paused manually, so save pause state for resume
+                                                        self.app_controller.save_pause_state(self.queue_list, force_save=True)
                         else:
                             # User was not paused, just save regular queue
                             print("Saving queue...")
@@ -1697,9 +1694,7 @@ class GUIDownloader(QWidget):
         """Handle operation complete signal from AppController."""
         # Don't handle operation complete during shutdown
         if hasattr(self.app_controller, 'is_shutting_down') and self.app_controller.is_shutting_down:
-            print("Skipping operation complete handling during shutdown")
             return
-            
         
         # Re-enable all buttons
         self._enable_all_buttons()
