@@ -157,15 +157,11 @@ class QueueManager(QObject):
                 size = self._fetch_file_size_for_item(item_text)
             tree_item.setText(1, size)
             tree_item.setTextAlignment(1, Qt.AlignRight)  # Right-align size
-            
-            # Set consistent height
-            tree_item.setSizeHint(0, QSize(0, 25))
         else:
             # No platform prefix found, just use text as is
             tree_item.setText(0, item_text)
             tree_item.setText(1, size)
             tree_item.setTextAlignment(1, Qt.AlignRight)
-            tree_item.setSizeHint(0, QSize(0, 25))
 
         queue_tree_widget.addTopLevelItem(tree_item)
         
@@ -176,14 +172,12 @@ class QueueManager(QObject):
         # Ensure columns are properly sized after adding item
         if queue_tree_widget.topLevelItemCount() == 1:  # Only resize on first item
             header = queue_tree_widget.header()
-            total_width = queue_tree_widget.viewport().width()
-            if queue_tree_widget.columnCount() == 3:  # New 3-column layout
-                header.resizeSection(0, int(total_width * 0.7))  # Name column 70%
-                header.resizeSection(1, int(total_width * 0.2))  # Size column 20%
-                header.resizeSection(2, int(total_width * 0.1))  # Actions column 10%
-            else:  # Old 2-column layout
-                header.resizeSection(0, int(total_width * 0.8))  # Name column 80%
-                header.resizeSection(1, int(total_width * 0.2))  # Size column 20%
+            # Don't try to calculate based on viewport width as it may not be accurate yet
+            # Let the header resize modes handle the sizing instead
+            if queue_tree_widget.columnCount() == 3:  # 3-column layout with actions
+                # Size column and actions column should use their fixed widths
+                # Name column will stretch to fill remaining space
+                pass  # Let the resize modes handle it
         
         return tree_item
     
@@ -230,7 +224,7 @@ class QueueManager(QObject):
         return re.sub(r'\s*\(DOWNLOADING\)\s*$', '', text_without_platform)
     
     def update_queue_status(self, queue_tree_widget, item_original_name, status, color=None, size=None):
-        """Update the queue item text to show the current operation status and size."""
+        """Update the queue item text to show the current operation status (preserve original file size)."""
         for i in range(queue_tree_widget.topLevelItemCount()):
             item = queue_tree_widget.topLevelItem(i)
             if item.data(0, Qt.UserRole) == item_original_name:
@@ -242,9 +236,8 @@ class QueueManager(QObject):
                 new_text = f"{clean_text} ({status})"
                 item.setText(0, new_text)
                 
-                # Update size if provided
-                if size:
-                    item.setText(1, size)
+                # Don't update size column - preserve original file size
+                # Size column should only show the final file size, not download progress
                 
                 # Apply bold font
                 font = QFont()

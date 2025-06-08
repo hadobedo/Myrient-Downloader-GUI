@@ -23,7 +23,7 @@ from core.settings import SettingsManager
 app_settings = None
 
 def detect_system_dark_mode():
-    """Simple detection of system dark mode preference."""
+    """Enhanced detection of system dark mode preference, especially for Linux."""
     try:
         if platform.system() == 'Windows':
             import winreg
@@ -37,16 +37,71 @@ def detect_system_dark_mode():
                                   capture_output=True, text=True, timeout=5)
             return result.stdout.strip().lower() == 'dark'
         elif platform.system() == 'Linux':
-            # Simple check for common dark themes
+            # Enhanced Linux dark mode detection
+            
+            # Check GTK theme preference
             gtk_theme = os.environ.get('GTK_THEME', '').lower()
-            return 'dark' in gtk_theme
-    except Exception:
-        pass
+            if 'dark' in gtk_theme:
+                return True
+            
+            # Check gsettings for GNOME-based desktops
+            try:
+                import subprocess
+                result = subprocess.run(['gsettings', 'get', 'org.gnome.desktop.interface', 'gtk-theme'],
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and 'dark' in result.stdout.lower():
+                    return True
+                    
+                # Also check for color scheme preference
+                result = subprocess.run(['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'],
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and 'dark' in result.stdout.lower():
+                    return True
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+            
+            # Check KDE plasma theme
+            kde_config_dirs = [
+                os.path.expanduser('~/.config/kdeglobals'),
+                os.path.expanduser('~/.kde/share/config/kdeglobals'),
+                os.path.expanduser('~/.kde4/share/config/kdeglobals')
+            ]
+            
+            for config_file in kde_config_dirs:
+                try:
+                    if os.path.exists(config_file):
+                        with open(config_file, 'r') as f:
+                            content = f.read().lower()
+                            if 'dark' in content or 'breezedark' in content:
+                                return True
+                except (OSError, IOError):
+                    pass
+            
+            # Check environment variables that might indicate dark theme
+            dark_indicators = [
+                'dark' in os.environ.get('QT_STYLE_OVERRIDE', '').lower(),
+                'dark' in os.environ.get('XDG_CURRENT_DESKTOP', '').lower(),
+                os.environ.get('KDE_SESSION_VERSION') and 'dark' in os.environ.get('KDEDIRS', '').lower()
+            ]
+            
+            if any(dark_indicators):
+                return True
+                
+    except Exception as e:
+        print(f"Error detecting system dark mode: {e}")
+    
+    # Default to False for Linux if we can't detect
     return False
 
 def apply_theme(app):
     """Apply theme using Qt's built-in system with user preference."""
     global app_settings
+    
+    # Ensure config directory exists
+    config_dir = './config'
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir, exist_ok=True)
+    
     app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
     
     # Get user preference: 'auto', 'light', 'dark', 'system' - default to 'dark'
@@ -70,7 +125,7 @@ def apply_theme(app):
         app.setStyle(QStyleFactory.create("Fusion"))
         palette = QPalette()
         
-        # Use colors with good contrast ratios
+        # Use colors with good contrast ratios - improved for Linux/Wayland compatibility
         palette.setColor(QPalette.Window, QColor(45, 45, 45))
         palette.setColor(QPalette.WindowText, QColor(255, 255, 255))
         palette.setColor(QPalette.Base, QColor(35, 35, 35))
@@ -85,21 +140,72 @@ def apply_theme(app):
         palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
         palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
         
+        # Additional colors for better Wayland/Linux compatibility
+        palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor(127, 127, 127))
+        palette.setColor(QPalette.Disabled, QPalette.Text, QColor(127, 127, 127))
+        palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(127, 127, 127))
+        
         app.setPalette(palette)
         
-        # Minimal stylesheet for better readability
+        # Enhanced stylesheet for better Linux/Wayland compatibility
         app.setStyleSheet("""
             QToolTip {
                 color: #ffffff;
                 background-color: #353535;
                 border: 1px solid #767676;
+                padding: 3px;
+                border-radius: 3px;
+            }
+            QGroupBox {
+                color: #ffffff;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                margin-top: 0.5em;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #555555;
+                background-color: #2d2d2d;
+            }
+            QTabBar::tab {
+                background-color: #3c3c3c;
+                color: #ffffff;
+                padding: 6px 12px;
+                margin-right: 1px;
+            }
+            QTabBar::tab:selected {
+                background-color: #2d2d2d;
+                border-bottom: 2px solid #42a5f5;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #484848;
             }
         """)
+        print("Applied dark theme with enhanced Linux/Wayland compatibility")
     else:
-        # Use Qt's default light theme
+        # Use Qt's default light theme with some enhancements
         app.setStyle(QStyleFactory.create("Fusion"))
-        app.setPalette(app.style().standardPalette())
-        app.setStyleSheet("")
+        palette = app.style().standardPalette()
+        app.setPalette(palette)
+        
+        # Light theme enhancements
+        app.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #c0c0c0;
+                border-radius: 3px;
+                margin-top: 0.5em;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        print("Applied light theme with enhancements")
     
     return use_dark
 
@@ -150,6 +256,34 @@ def show_error_dialog(message, details=None):
         msg_box.setDetailedText(details)
     msg_box.exec_()
 
+def detect_wayland():
+    """Detect if running under Wayland and apply necessary fixes."""
+    # Check multiple indicators for Wayland session
+    wayland_indicators = [
+        os.environ.get("XDG_SESSION_TYPE") == "wayland",
+        os.environ.get("WAYLAND_DISPLAY") is not None,
+        os.environ.get("GDK_BACKEND") == "wayland",
+        "wayland" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+    ]
+    
+    is_wayland = any(wayland_indicators)
+    
+    if is_wayland:
+        print("Wayland session detected, applying Qt fixes...")
+        # Force Qt to use X11 backend for better compatibility
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        # Disable auto scaling which can cause issues on Wayland
+        os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+        # Additional Wayland compatibility settings
+        os.environ["QT_SCALE_FACTOR"] = "1"
+        os.environ["QT_SCREEN_SCALE_FACTORS"] = ""
+        # Force software rendering if needed
+        if not os.environ.get("QT_QUICK_BACKEND"):
+            os.environ["QT_QUICK_BACKEND"] = "software"
+        print("Applied Wayland compatibility settings")
+    
+    return is_wayland
+
 def main():
     """Main entry point for the application."""
     try:
@@ -163,16 +297,14 @@ def main():
         
         sys.excepthook = global_except_hook
         
-        # Initialize Qt application first
+        # IMPORTANT: Detect and fix Wayland issues BEFORE creating QApplication
+        is_wayland = detect_wayland()
+        
+        # Initialize Qt application AFTER Wayland fixes
         app = QApplication(sys.argv)
         
         # Apply theme settings
         is_dark = apply_theme(app)
-        
-        # Detect Wayland and apply fixes
-        if os.environ.get("XDG_SESSION_TYPE") == "wayland":
-            os.environ["QT_QPA_PLATFORM"] = "xcb"
-            os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
         
         # Run startup validation
         validate_startup_prerequisites()

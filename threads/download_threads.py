@@ -365,8 +365,8 @@ class DownloadThread(QThread):
         self.current_session_downloaded = 0
         self.running = True
         self.paused = False
-        self.pause_event = asyncio.Event()
-        self.pause_event.set()  # Not paused initially
+        self.pause_event = None  # Will be created in the async context
+        self._stop_requested = False
         
         # For smooth speed calculation
         self.speed_window_size = 20  # Reduced window size to be more responsive
@@ -391,6 +391,10 @@ class DownloadThread(QThread):
         self.read_timeout = 30.0         # Read timeout in seconds
 
     async def download(self):
+        # Create pause event in the async context
+        self.pause_event = asyncio.Event()
+        self.pause_event.set()  # Not paused initially
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': '*/*',
@@ -443,14 +447,16 @@ class DownloadThread(QThread):
                             
                             while True:
                                 # Check if we should stop
-                                if not self.running:
-                                    print("Download thread stopped")
+                                if not self.running or self._stop_requested:
                                     return
                                 
                                 # Check if we should pause
                                 if self.paused:
+                                    print("Download paused, waiting for resume...")
                                     self.download_paused_signal.emit()
+                                    # Wait for resume - this will block until pause_event is set
                                     await self.pause_event.wait()
+                                    print("Download resumed from pause")
                                     # Reset timing information after pause
                                     self.start_time = time.time()
                                     self.last_update_time = time.time()
@@ -648,20 +654,40 @@ class DownloadThread(QThread):
             return f"{size_in_bytes/(1024*1024*1024):.1f} GB"
 
     def run(self):
-        asyncio.run(self.download())
-        # Only emit completion if not paused
-        if not self.paused:
-            self.download_complete_signal.emit()
+        try:
+            asyncio.run(self.download())
+            # Only emit completion if not paused and not stopped
+            if not self.paused and not self._stop_requested and self.running:
+                print("Download thread completed successfully")
+                self.download_complete_signal.emit()
+            else:
+                pass  # Download finished without completion signal
+        except Exception as e:
+            print(f"Download thread error: {e}")
+            if self.running and not self._stop_requested:
+                self.download_complete_signal.emit()
 
     def stop(self):
+        print("Stopping download thread...")
         self.running = False
-        
-    def pause(self):
-        if not self.paused:
-            self.paused = True
-            self.pause_event.clear()
-        
-    def resume(self):
-        if self.paused:
+        self._stop_requested = True
+        # If we're paused, resume to allow thread to exit
+        if self.paused and self.pause_event:
             self.paused = False
             self.pause_event.set()
+        
+    def pause(self):
+        print("Pausing download thread...")
+        if not self.paused:
+            self.paused = True
+            if self.pause_event:
+                self.pause_event.clear()
+            print("Download thread pause requested")
+        
+    def resume(self):
+        print("Resuming download thread...")
+        if self.paused:
+            self.paused = False
+            if self.pause_event:
+                self.pause_event.set()
+            print("Download thread resume requested")

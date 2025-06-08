@@ -327,6 +327,9 @@ class DownloadManager(QObject):
         self.download_thread.size_signal.connect(self._handle_size_update)
         self.download_thread.download_paused_signal.connect(self.download_paused.emit)
         
+        # Store file path for pause/resume
+        self.current_file_path = zip_file_path
+        
         # Create an event loop and wait for download to complete
         loop = QEventLoop()
         self.download_thread.finished.connect(loop.quit)
@@ -344,21 +347,37 @@ class DownloadManager(QObject):
     
     def pause_download(self):
         """Pause the current download."""
+        print("Download manager pausing...")
         self.is_paused = True
-        if self.download_thread and self.current_operation == 'download':
+        if self.download_thread and self.download_thread.isRunning():
             self.download_thread.pause()
+            print("Download thread pause requested")
+        else:
+            print("No active download thread to pause")
     
     def resume_download(self):
         """Resume a previously paused download."""
+        print("Download manager resuming...")
         self.is_paused = False
-        if self.download_thread and self.current_operation == 'download':
+        if self.download_thread and self.download_thread.isRunning():
             self.download_thread.resume()
+            print("Download thread resume requested")
+        else:
+            print("No active download thread to resume")
+            # This is expected when resuming from a detected partial file
+            # The app controller should handle restarting the download process
     
     def stop_download(self):
         """Stop the current download."""
         if self.download_thread:
             self.download_thread.stop()
+            if self.download_thread.isRunning():
+                self.download_thread.wait(5000)  # Wait up to 5 seconds
+            self.download_thread = None
             self.current_queue_item = None  # Clear queue item reference
+        else:
+            print("No download thread to stop")
+        # Don't set is_paused here - let the app controller handle state
     
     def _get_filename_from_queue_item(self, item_text):
         """Extract filename from a formatted queue item."""
@@ -380,6 +399,14 @@ class DownloadManager(QObject):
         self.current_operation = None
         self.current_file_path = None
         self.current_queue_item = None  # Clear queue item reference
+        self.is_paused = False
+        
+        # Clean up download thread if it exists
+        if self.download_thread:
+            if self.download_thread.isRunning():
+                self.download_thread.stop()
+                self.download_thread.wait(3000)  # Wait up to 3 seconds
+            self.download_thread = None
     
     def reset_overwrite_choices(self):
         """Reset overwrite manager choices for new download session."""

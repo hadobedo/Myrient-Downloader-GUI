@@ -249,34 +249,41 @@ class GUIDownloader(QWidget):
     
     def _setup_queue(self):
         """Setup the queue and check for paused downloads."""
-        # Load the queue using AppController - this returns full queue data
-        queue_data = self.app_controller.queue_manager.load_queue()
-        
-        # Add items to the queue tree using AppController's queue manager
-        for item_data in queue_data:
-            # Ensure item_data is in the correct format
-            if isinstance(item_data, dict):
-                self.app_controller.queue_manager.add_formatted_item_to_queue(item_data, self.queue_list)
+        self.was_paused_on_startup = False # Initialize flag
+
+        # AppController now handles checking for paused state (physical or saved)
+        # and populates the queue_list widget accordingly if a paused state is found.
+        if self.app_controller.check_for_paused_download(self.queue_list):
+            self.start_pause_button.setText('Resume')
+            self.was_paused_on_startup = True
+            self.status_header.setText("Paused")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffd700;")
+            print("Resumable download found and queue populated by AppController.")
+        else:
+            # No resumable state found by AppController, load queue normally.
+            # AppController's check_for_paused_download might have already loaded it if no pause state was found.
+            # We ensure it's loaded here if the queue is still empty.
+            if self.queue_list.topLevelItemCount() == 0:
+                print("No resumable download found by AppController. Loading queue from storage.")
+                queue_data = self.app_controller.queue_manager.load_queue()
+                for item_data in queue_data:
+                    if isinstance(item_data, dict):
+                        self.app_controller.queue_manager.add_formatted_item_to_queue(item_data, self.queue_list)
+                    else:
+                        item_dict = {'name': item_data, 'size': ''}
+                        self.app_controller.queue_manager.add_formatted_item_to_queue(item_dict, self.queue_list)
             else:
-                # Convert old format to new format
-                item_dict = {'name': item_data, 'size': ''}
-                self.app_controller.queue_manager.add_formatted_item_to_queue(item_dict, self.queue_list)
-            
-        # Adjust column widths after adding items
-        self.queue_list.header().setStretchLastSection(False)  # Disable auto-stretch
-        total_width = self.queue_list.viewport().width()
-        self.queue_list.header().resizeSection(0, int(total_width * 0.8))  # Name column 80%
-        self.queue_list.header().resizeSection(1, int(total_width * 0.2))  # Size column 20%
-        
-        # If queue is empty, clear any stale pause state
+                print("Queue already populated by AppController (no pause state, but queue loaded).")
+
+
+        # Column widths are handled by resize modes set during UI initialization
+
+
+        # If queue is empty after all checks, clear any stale pause state from StateManager
         if self.queue_list.topLevelItemCount() == 0:
             from core.state_manager import StateManager
             StateManager.clear_pause_state()
-        
-        # Check if we need to resume a paused download
-        if self.app_controller.check_for_paused_download(self.queue_list):
-            self.start_pause_button.setText('Resume')
-        
+
         # Update queue item sizes asynchronously if any are missing
         try:
             if self.queue_list.topLevelItemCount() > 0:
@@ -293,6 +300,7 @@ class GUIDownloader(QWidget):
         self.app_controller.queue_updated.connect(self._on_queue_updated)
         self.app_controller.operation_complete.connect(self._on_operation_complete)
         self.app_controller.operation_paused.connect(self._on_operation_paused)
+        self.app_controller.status_updated.connect(self._on_status_updated)
         self.app_controller.error_occurred.connect(self._on_error)
 
     def init_software_lists(self):
@@ -547,35 +555,31 @@ class GUIDownloader(QWidget):
         self.queue_list.setColumnCount(3)
         self.queue_list.setHeaderLabels(['Name', 'Size', 'Actions'])
         
-        # Configure column properties
+        # Configure column properties to match file list styling
         header = self.queue_list.header()
         header.setSectionsMovable(False)  # Prevent column reordering
         header.setStretchLastSection(False)  # Don't stretch last column
-        # Set column widths: Name (stretch), Size (fixed), Actions (fixed for buttons)
-        self.queue_list.setColumnWidth(1, 80)   # Size column
-        self.queue_list.setColumnWidth(2, 50)   # Actions column for buttons
         header.setSectionResizeMode(0, header.ResizeMode.Stretch)  # Name column stretches
         header.setSectionResizeMode(1, header.ResizeMode.Fixed)    # Size column fixed width
         header.setSectionResizeMode(2, header.ResizeMode.Fixed)    # Actions column fixed width
+        
+        # Set column widths to match file list proportions
+        self.queue_list.setColumnWidth(1, 100)   # Size column - same as file list
+        self.queue_list.setColumnWidth(2, 60)    # Actions column for buttons
         
         # Disable sorting for queue to preserve manual ordering
         self.queue_list.setSortingEnabled(False)
         self.queue_list.header().setSortIndicatorShown(False)
         
+        # Match file list appearance settings
         self.queue_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.queue_list.itemSelectionChanged.connect(self.update_remove_from_queue_button)
-        self.queue_list.setAllColumnsShowFocus(True)  # Show focus across all columns
-        self.queue_list.setWordWrap(True)
-        self.queue_list.setMinimumHeight(150)
+        self.queue_list.setAllColumnsShowFocus(True)
         self.queue_list.setUniformRowHeights(True)
-        self.queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.queue_list.header().setStretchLastSection(False)
-        # Set initial column sizes
-        header = self.queue_list.header()
-        total_width = self.queue_list.viewport().width()
-        header.resizeSection(0, int(total_width * 0.7))  # Name column 70%
-        header.resizeSection(1, int(total_width * 0.2))  # Size column 20%
-        header.resizeSection(2, int(total_width * 0.1))  # Actions column 10%
+        self.queue_list.setRootIsDecorated(False)  # No tree indicators like file list
+        self.queue_list.setAlternatingRowColors(False)  # Match file list
+        self.queue_list.setMinimumHeight(150)
+        
         queue_layout.addWidget(self.queue_list)
         
         # Queue control buttons (only remove button now)
@@ -640,6 +644,12 @@ class GUIDownloader(QWidget):
         self.output_toggle_button.clicked.connect(self.toggle_output_window)
         # self.output_window is already created and will be managed by create_collapsible_output_section
 
+        # Status header to show current operation
+        self.status_header = QLabel('Ready')
+        self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #666;")
+        self.status_header.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.status_header)
+        
         progress_header = QLabel('Progress')
         progress_header.setStyleSheet("font-weight: bold; font-size: 14px;")
         main_layout.addWidget(progress_header)
@@ -1358,28 +1368,59 @@ class GUIDownloader(QWidget):
 
     def closeEvent(self, event):
         """Handle the close event."""
+        print("Window closing, cleaning up...")
+        
         try:
             # Restore stdout first to ensure we can see any errors
-            if hasattr(self, 'output_window'):
+            if hasattr(self, 'output_window') and self.output_window:
                 self.output_window.restore_stdout()
                 
-            # Try to save state if we have an app controller
-            if hasattr(self, 'app_controller'):
-                self.app_controller.save_pause_state(self.queue_list)
+            # Stop any active downloads/processing first
+            if hasattr(self, 'app_controller') and self.app_controller:
+                print("Stopping application controller operations...")
+                
+                # Check if user had manually paused before closing
+                was_paused_before_shutdown = self.app_controller.is_paused
+                
+                self.app_controller.stop_processing(force_stop=True)
+                
+                # Save state based on what the user was doing before shutdown
+                try:
+                    if hasattr(self, 'queue_list') and self.queue_list:
+                        if was_paused_before_shutdown:
+                            # User had paused manually, so save pause state for resume
+                            print("Saving pause state (user had paused before closing)...")
+                            self.app_controller.save_pause_state(self.queue_list, force_save=True)
+                        else:
+                            # User was not paused, just save regular queue
+                            print("Saving queue...")
+                            self.app_controller.save_queue(self.queue_list)
+                except RuntimeError as e:
+                    if "wrapped C/C++ object" in str(e):
+                        print("Queue widget deleted, skipping save")
+                    else:
+                        raise
             
             # Stop all threads
             self._stop_all_threads()
+            
+        except RuntimeError as e:
+            if "wrapped C/C++ object" in str(e):
+                print("UI widgets already deleted during shutdown")
+            else:
+                print(f"Runtime error during shutdown: {str(e)}")
         except Exception as e:
             print(f"Error during shutdown: {str(e)}")
         finally:
-            # Always accept the event and schedule quit
+            print("Window cleanup complete")
+            # Always accept the event and schedule quit with shorter delay
             event.accept()
-            QTimer.singleShot(100, QApplication.instance().quit)
+            QTimer.singleShot(50, QApplication.instance().quit)
     
     def _stop_all_threads(self):
         """Stop all running threads gracefully."""
-        # Stop AppController operations
-        self.app_controller.stop_processing()
+        # Stop AppController operations with force_stop flag
+        self.app_controller.stop_processing(force_stop=True)
         
         # Stop platform threads if running
         if hasattr(self, 'platform_threads'):
@@ -1394,15 +1435,29 @@ class GUIDownloader(QWidget):
         """Handle start or pause button click based on current state."""
         button_text = self.start_pause_button.text()
         
-        if button_text == 'Start':
-            self.start_download()
-        elif button_text == 'Pause':
-            self.pause_download()
-        elif button_text == 'Resume':
-            self.resume_download()
+        try:
+            if button_text == 'Start':
+                self.start_download()
+            elif button_text == 'Pause':
+                self.pause_download()
+            elif button_text == 'Resume':
+                self.resume_download()
+        except Exception as e:
+            print(f"Error in start_or_pause_download: {e}")
+            self._reset_ui_state()
 
     def start_download(self):
         """Start downloading the selected items."""
+        print("Starting download...")
+        
+        # Check if queue is empty
+        if self.queue_list.topLevelItemCount() == 0:
+            print("Queue is empty, nothing to download")
+            return
+        
+        # Reset any previous state
+        self._reset_download_state()
+        
         # Disable the GUI buttons except pause
         self._disable_controls_during_processing()
         
@@ -1413,30 +1468,65 @@ class GUIDownloader(QWidget):
         settings = self._get_current_settings()
         
         # Start processing using AppController
-        self.app_controller.start_processing(self.queue_list, settings)
+        try:
+            self.app_controller.start_processing(self.queue_list, settings)
+        except Exception as e:
+            print(f"Error starting processing: {e}")
+            self._reset_ui_state()
     
     def pause_download(self):
         """Pause the current download or extraction process."""
-        self.app_controller.pause_processing()
+        print("Pausing download...")
         
-        # Change the button text to 'Resume'
-        self.start_pause_button.setText('Resume')
+        # Check if already paused (button is not "Pause")
+        if self.start_pause_button.text() != 'Pause':
+            print("Download is not running, ignoring pause request")
+            return
         
-        # Enable settings and remove from queue buttons when paused
-        self._enable_controls_during_pause()
+        try:
+            # Pause processing first
+            self.app_controller.pause_processing()
+            
+            # Update UI state
+            self.start_pause_button.setText('Resume')
+            self._enable_controls_during_pause()
+            
+            print("Download paused successfully")
+        except Exception as e:
+            print(f"Error pausing download: {e}")
+            self._reset_ui_state()
     
     def resume_download(self):
         """Resume a previously paused download."""
-        self.start_pause_button.setText('Pause')
+        print("Resuming download...")
         
-        # Get current settings
-        settings = self._get_current_settings()
+        # Check if already resumed (button is not "Resume")
+        if self.start_pause_button.text() != 'Resume':
+            print("Download is not paused, ignoring resume request")
+            return
         
-        # Disable controls during processing
-        self._disable_controls_during_processing()
-        
-        # Resume processing using AppController
-        self.app_controller.resume_processing(self.queue_list, settings)
+        try:
+            # Check if queue is empty
+            if self.queue_list.topLevelItemCount() == 0:
+                print("Queue is empty, cannot resume")
+                self._reset_ui_state()
+                return
+            
+            # Update UI first
+            self.start_pause_button.setText('Pause')
+            self._disable_controls_during_processing()
+            
+            # Get current settings
+            settings = self._get_current_settings()
+            
+            # Resume processing using AppController
+            self.app_controller.resume_processing(self.queue_list, settings)
+            
+            print("Download resumed successfully")
+        except Exception as e:
+            print(f"Error resuming download: {e}")
+            self._on_error(f"Resume failed: {str(e)}")
+            self._reset_ui_state()
     
     def _disable_controls_during_processing(self):
         """Disable GUI controls during processing."""
@@ -1469,21 +1559,110 @@ class GUIDownloader(QWidget):
 
     def _enable_all_buttons(self):
         """Re-enable all GUI buttons."""
-        self.settings_button.setEnabled(True)
-        self.add_to_queue_button.setEnabled(True)
-        self.remove_from_queue_button.setEnabled(True)
-        self.queue_list.setEnabled(True)  # Re-enable queue interaction including inline buttons
-        self.decrypt_checkbox.setEnabled(True)
-        self.split_checkbox.setEnabled(True)
-        self.keep_dkey_checkbox.setEnabled(True)
-        self.keep_enc_checkbox.setEnabled(True)
-        self.keep_unsplit_dec_checkbox.setEnabled(True)
-        self.split_pkg_checkbox.setEnabled(True)
-        self.extract_ps3_checkbox.setEnabled(True)
-        self.keep_decrypted_iso_checkbox.setEnabled(True)
-        self.organize_content_checkbox.setEnabled(True)
-        self.start_pause_button.setEnabled(True)
-        self.start_pause_button.setText('Start')
+        try:
+            if hasattr(self, 'settings_button') and self.settings_button:
+                self.settings_button.setEnabled(True)
+            if hasattr(self, 'add_to_queue_button') and self.add_to_queue_button:
+                self.add_to_queue_button.setEnabled(True)
+            if hasattr(self, 'remove_from_queue_button') and self.remove_from_queue_button:
+                self.remove_from_queue_button.setEnabled(True)
+            if hasattr(self, 'queue_list') and self.queue_list:
+                self.queue_list.setEnabled(True)  # Re-enable queue interaction including inline buttons
+            if hasattr(self, 'decrypt_checkbox') and self.decrypt_checkbox:
+                self.decrypt_checkbox.setEnabled(True)
+            if hasattr(self, 'split_checkbox') and self.split_checkbox:
+                self.split_checkbox.setEnabled(True)
+            if hasattr(self, 'keep_dkey_checkbox') and self.keep_dkey_checkbox:
+                self.keep_dkey_checkbox.setEnabled(True)
+            if hasattr(self, 'keep_enc_checkbox') and self.keep_enc_checkbox:
+                self.keep_enc_checkbox.setEnabled(True)
+            if hasattr(self, 'keep_unsplit_dec_checkbox') and self.keep_unsplit_dec_checkbox:
+                self.keep_unsplit_dec_checkbox.setEnabled(True)
+            if hasattr(self, 'split_pkg_checkbox') and self.split_pkg_checkbox:
+                self.split_pkg_checkbox.setEnabled(True)
+            if hasattr(self, 'extract_ps3_checkbox') and self.extract_ps3_checkbox:
+                self.extract_ps3_checkbox.setEnabled(True)
+            if hasattr(self, 'keep_decrypted_iso_checkbox') and self.keep_decrypted_iso_checkbox:
+                self.keep_decrypted_iso_checkbox.setEnabled(True)
+            if hasattr(self, 'organize_content_checkbox') and self.organize_content_checkbox:
+                self.organize_content_checkbox.setEnabled(True)
+            if hasattr(self, 'start_pause_button') and self.start_pause_button:
+                self.start_pause_button.setEnabled(True)
+                # Only set to 'Start' if not paused on startup
+                if not getattr(self, "was_paused_on_startup", False):
+                    self.start_pause_button.setText('Start')
+        except RuntimeError as e:
+            if "wrapped C/C++ object" in str(e):
+                print("Some UI widgets have been deleted, skipping enable")
+            else:
+                raise
+    
+    def _reset_download_state(self):
+        """Reset download state before starting new download."""
+        # Don't reset state during shutdown to prevent unwanted operations
+        if hasattr(self.app_controller, 'is_shutting_down') and self.app_controller.is_shutting_down:
+            return
+            
+        # Clear any existing app controller state
+        if hasattr(self.app_controller, 'is_paused'):
+            self.app_controller.is_paused = False
+        if hasattr(self.app_controller, 'current_operation'):
+            self.app_controller.current_operation = None
+        if hasattr(self.app_controller, 'current_item'):
+            self.app_controller.current_item = None
+        
+        # Reset download manager state
+        if hasattr(self.app_controller, 'download_manager'):
+            self.app_controller.download_manager.is_paused = False
+            self.app_controller.download_manager.current_operation = None
+            if self.app_controller.download_manager.download_thread:
+                # Stop any existing download thread
+                self.app_controller.download_manager.download_thread.stop()
+                self.app_controller.download_manager.download_thread = None
+        
+        # Reset processing manager state
+        if hasattr(self.app_controller, 'processing_manager'):
+            self.app_controller.processing_manager.is_paused = False
+            self.app_controller.processing_manager.current_operation = None
+        
+        # Clear state manager
+        from core.state_manager import StateManager
+        StateManager.clear_pause_state()
+    
+    def _reset_ui_state(self):
+        """Reset UI to a consistent state after errors."""
+        print("Resetting UI state...")
+        
+        # Check if widgets still exist before accessing them
+        try:
+            if hasattr(self, 'start_pause_button') and self.start_pause_button:
+                # Only set to 'Start' if not paused on startup
+                if not getattr(self, "was_paused_on_startup", False):
+                    self.start_pause_button.setText('Start')
+                self.start_pause_button.setEnabled(True)
+            
+            # Re-enable all controls
+            self._enable_all_buttons()
+            
+            # Clear progress indicators
+            if hasattr(self, 'progress_bar') and self.progress_bar:
+                self.progress_bar.setValue(0)
+            if hasattr(self, 'download_speed_label') and self.download_speed_label:
+                self.download_speed_label.clear()
+            if hasattr(self, 'download_eta_label') and self.download_eta_label:
+                self.download_eta_label.clear()
+            if hasattr(self, 'download_size_label') and self.download_size_label:
+                self.download_size_label.clear()
+            
+            # Reset download state
+            self._reset_download_state()
+            
+            print("UI state reset complete")
+        except RuntimeError as e:
+            if "wrapped C/C++ object" in str(e):
+                print("UI widgets have been deleted, skipping UI reset")
+            else:
+                raise
 
     def _get_current_settings(self):
         """Get current settings from the GUI."""
@@ -1516,10 +1695,18 @@ class GUIDownloader(QWidget):
             
     def _on_operation_complete(self):
         """Handle operation complete signal from AppController."""
+        # Don't handle operation complete during shutdown
+        if hasattr(self.app_controller, 'is_shutting_down') and self.app_controller.is_shutting_down:
+            print("Skipping operation complete handling during shutdown")
+            return
+            
+        
         # Re-enable all buttons
         self._enable_all_buttons()
         
-        # Clear status labels
+        # Clear status labels and reset status header
+        self.status_header.setText("Ready")
+        self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #666;")
         self.download_speed_label.clear()
         self.download_eta_label.clear()
         self.download_size_label.clear()
@@ -1527,10 +1714,51 @@ class GUIDownloader(QWidget):
         
         # Clear the queue file since processing is complete
         self.app_controller.save_queue(self.queue_list)
-    def _on_operation_paused(self, item_name):
+        
+        # Reset download state completely
+        self._reset_download_state()
+        
+    
+    def _on_operation_paused(self):
         """Handle operation paused signal from AppController."""
+        print("Operation paused signal received")
+        
+        # Update status header to show paused state
+        self.status_header.setText("Paused")
+        self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffd700;")
+        
+        # Ensure button shows Resume
         self.start_pause_button.setText('Resume')
+        
+        # Enable controls during pause
         self._enable_controls_during_pause()
+        
+        print("Operation paused handling finished")
+
+    def _on_status_updated(self, status):
+        """Handle status update signal from AppController."""
+        # Update the status header with current operation
+        if status == "DOWNLOADING":
+            self.status_header.setText("Downloading...")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #0080ff;")
+        elif status == "UNZIPPING":
+            self.status_header.setText("Extracting archive...")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ff8c00;")
+        elif status == "DECRYPTING":
+            self.status_header.setText("Decrypting...")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ff4500;")
+        elif status == "EXTRACTING":
+            self.status_header.setText("Extracting ISO...")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #32cd32;")
+        elif status == "SPLITTING":
+            self.status_header.setText("Splitting files...")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ff8c00;")
+        elif status == "PAUSED":
+            self.status_header.setText("Paused")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffd700;")
+        else:
+            self.status_header.setText("Ready")
+            self.status_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #666;")
 
     def _on_error(self, error_message):
         """Handle error signal from AppController."""
