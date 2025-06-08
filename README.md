@@ -1,41 +1,80 @@
 # Myrient-Downloader-GUI
-Tool to download software from Myrient, written in Python
-![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/5d499a6b-b53e-4a09-bafe-785e01261973)
+GUI that manages the downloading and processing video game ROMs/ISOs from [Myrient Video Game Preservationists](https://myrient.erista.me). Written in Python! 
 
-Features:
-- Downloads software over HTTP from [the Myrient Video Game Preservationists](https://myrient.erista.me)
-- Options to decrypts and split downloaded software for use on consoles, storage on FAT32 devices
-- User-friendly setup (prompts users to download required binaries automatically)
-- Cross platform (macOS = ?)
+## Features
+- **Multi-Platform Support**: Download ROMs/ISOs from multiple gaming platforms
+  - Available platforms are easily extensible via YAML configuration
+- **PS3 ISO Decryption & Extraction**: Option to decrypts and extract downloaded PS3 software for use on consoles and/or emulators like RPCS3
+- **User-Friendly Setup**: Required binaries are retrieved & set automatically (on Windows)
+- **Cross Platform**: Should work across all platforms!
 
-Usage:
-1. [Download the latest release for your platform](https://github.com/hadobedo/Myrient-Downloader-GUI/releases/latest)
-2. Run the exe
-3. (If on Windows) On first run the software will prompt the user to automatically download [`PS3Dec`](https://github.com/Redrrx/ps3dec) & [`ps3iso-utils`](https://github.com/bucanero/ps3iso-utils) for their platform.
+## Quick Start
 
-To run the script as a .py file:
-1. Clone repo & cd into folder `git clone https://github.com/hadobedo/Myrient-Downloader-GUI/ && cd Myrient-Downloader-GUI/`
-2. Install the requirements (if on Arch Linux see below) `pip install -r requirements.txt`
-3. Run the script `python3 ./myrientDownloaderGUI.py`
+### Pre-built Releases (Recommended)
+1. **[Download the latest release](https://github.com/hadobedo/Myrient-Downloader-GUI/releases/latest) for your platform**
+2. **Extract** and **run** the executable
+3. _**That's it!**_ File lists/necessary files will be retrieved automatically and stored in `config/`.
 
-Requirements on Arch Linux can be installed like so:
-`sudo pacman -S python-aiohttp python-beautifulsoup4 python-pyqt5 python-requests`
+### Required files for PS3 processing - Windows
+- **Simply launch `Myrient-Downloader-GUI` and you should be prompted to automatically download the required tools from their respective repositories!**
+  - Alternatively, you can download the binaries `PS3Dec` and `extractps3iso` from below and manually specify them via `Settings`
 
-PS3Dec is available from the AUR as [`ps3dec-git`](https://aur.archlinux.org/packages/ps3dec-git)
-ps3iso-utils is available from the AUR as [`ps3iso-utils-git`](https://aur.archlinux.org/packages/ps3iso-utils-git)
+### Required files for PS3 processing - Linux
+```bash
+# Arch Linux (AUR)
+yay -S ps3dec-git ps3iso-utils-git
 
-Credits/Binaries used:
-- [Myrient Video Game Preservationists](https://myrient.erista.me) [[Donation Link]](https://myrient.erista.me/donate/)
-- [Redrrx's PS3Dec rewrite in Rust](https://github.com/Redrrx/ps3dec)
-- [gotbletu's `ps3-split-iso` and `ps3-split-pkg` scripts 'ported'/adapted into Python)](https://github.com/gotbletu/shownotes/blob/master/ps3_split_merge_games.md)
-- [bucanero's ps3iso-utils](https://github.com/bucanero/ps3iso-utils) (use their `extractps3iso`)
-- gpt-4 :)
+# Or install manually from source repositories
+```
 
-TODO:
-- add support for more software
-- add support for user specified software
-- clean up code
+## Configuration
+### Platform Configuration
+The application uses a dynamic YAML-based configuration system located in [`config/myrient_urls.yaml`](config/myrient_urls.yaml), allowing for easy addition of new platforms without changing code.
 
-screenshots:
-![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/4447999e-d90f-409b-aab5-e68416e54637)
-![image](https://github.com/hadobedo/Myrient-Downloader-GUI/assets/34556645/3d2af247-1eeb-4821-993f-715c21e14084)
+### Settings Menu
+The destination folders of in-progress and completed downloads for each platform can be defined via the Settings menu. Settings are saved to `config/myrientDownloaderGUI.ini`.
+
+## Running from Source
+
+#### Prerequisites
+```bash
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Or on Arch Linux:
+sudo pacman -S python-aiohttp python-beautifulsoup4 python-pyqt5 python-requests python-yaml python-pycdlib
+```
+
+#### Installation
+```bash
+# Clone the repository
+git clone https://github.com/hadobedo/Myrient-Downloader-GUI.git
+cd Myrient-Downloader-GUI
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the application
+python3 ./myrientDownloaderGUI.py
+```
+
+## Credits/Binaries used:
+- **[Myrient Video Game Preservationists](https://myrient.erista.me)** - Game preservation and hosting [[Support Myrient]](https://myrient.erista.me/donate/)
+- **[Redrrx's PS3Dec](https://github.com/Redrrx/ps3dec)** - Modern PS3 ISO decryption tool
+- **[bucanero's ps3iso-utils](https://github.com/bucanero/ps3iso-utils)** - PS3 ISO extraction utilities
+- **[gotbletu's `ps3-split-iso` and `ps3-split-pkg` scripts)](https://github.com/gotbletu/shownotes/blob/master/ps3_split_merge_games.md)** - PS3 ISO/PKG splitting scripts adapted into Python
+- AI :)
+
+## TODO
+- Better logging
+  - Also add toggle to enable/disable ps3 decryption logs on Windows
+- Terminal interface
+- Consolidate `myrient_urls.yaml` and `myrientDownloaderGUI.ini` into a single yaml (maybe)
+- Improve downloading of filelist `jsons` and `myrient_urls.yaml`, goal is to make user 'more aware' of what's happening
+- Add dropdown box/'hardcode' some myrient urls for easier system configuration (maybe)
+
+## Screenshots:
+![image](https://github.com/user-attachments/assets/d746212f-65b6-47b1-9f78-11264e73cd12)
+![image](https://github.com/user-attachments/assets/d6d9d0e2-a0a8-401b-8a55-291e45254180)
+![image](https://github.com/user-attachments/assets/79e3be21-7e65-4417-b000-365ae86dabd0)
+
