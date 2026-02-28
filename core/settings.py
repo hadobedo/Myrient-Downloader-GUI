@@ -892,7 +892,7 @@ class SettingsManager:
             self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
         else:
             # Check if it's in the bin directory
-            bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+            bin_dir = os.path.join(self.root_dir, 'bin')
             bin_binary = os.path.join(bin_dir, "ps3dec.exe")
             if os.path.isfile(bin_binary):
                 self.ps3dec_binary = bin_binary
@@ -914,11 +914,11 @@ class SettingsManager:
             self.extractps3iso_binary = extractps3iso_in_path
             self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
         else:
-            # Check if it's in the config directory first
-            config_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'config')
-            config_binary = os.path.join(config_dir, binary_name)
-            if os.path.isfile(config_binary):
-                self.extractps3iso_binary = config_binary
+            # Check if it's in the bin directory
+            bin_dir = os.path.join(self.root_dir, 'bin')
+            bin_binary = os.path.join(bin_dir, binary_name)
+            if os.path.isfile(bin_binary):
+                self.extractps3iso_binary = bin_binary
                 self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
             else:
                 # Check if it's in the current directory (legacy location)
@@ -945,7 +945,7 @@ class SettingsManager:
                 print("Downloading PS3Dec from GitHub...")
                 
                 # Ensure bin directory exists
-                bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+                bin_dir = os.path.join(self.root_dir, 'bin')
                 os.makedirs(bin_dir, exist_ok=True)
                 
                 # Download to bin directory
@@ -1093,7 +1093,7 @@ class SettingsManager:
                 
                 if extractps3iso_found:
                     # Update the binary path to bin directory
-                    bin_dir = os.path.join(os.getcwd(), 'bin')
+                    bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
                     extractps3iso_path = os.path.join(bin_dir, "extractps3iso.exe")
                     
                     self.extractps3iso_binary = extractps3iso_path
