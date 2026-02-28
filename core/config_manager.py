@@ -5,7 +5,7 @@ import sys
 class ConfigManager:
     """Manages application configuration loaded from YAML files."""
     
-    DEFAULT_CONFIG_PATH = "MyrientDownloads/config/myrient_urls.yaml"
+    DEFAULT_CONFIG_PATH = "MyrientDownloads/myrient_urls.yaml"
     # Class variable to track if we've already printed the config loaded message
     _config_loaded_message_shown = False
     
@@ -21,7 +21,7 @@ ps3:
 
 psn:
   tab_name: "PS3/PSN (PKG)"
-  url: "https://f3.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
+  url: "https://f6.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
   show_pkg_split: true
 
 ps2:
