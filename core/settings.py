@@ -1042,7 +1042,7 @@ class SettingsManager:
                                         print(f"Found extractps3iso binary in TAR: {tar_file}")
                                         
                                         # Ensure bin directory exists
-                                        bin_dir = os.path.join(os.getcwd(), 'bin')
+                                        bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
                                         os.makedirs(bin_dir, exist_ok=True)
                                         
                                         # Extract the specific file to bin directory
@@ -1072,7 +1072,7 @@ class SettingsManager:
                                 print(f"Found extractps3iso binary: {file}")
                                 
                                 # Ensure bin directory exists
-                                bin_dir = os.path.join(os.getcwd(), 'bin')
+                                bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
                                 os.makedirs(bin_dir, exist_ok=True)
                                 
                                 # Extract the file to bin directory
