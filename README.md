@@ -1,6 +1,13 @@
 # Myrient-Downloader-GUI
 GUI that manages the downloading and processing video game ROMs/ISOs from [Myrient Video Game Preservationists](https://myrient.erista.me). Written in Python! 
 
+> [!IMPORTANT]
+> **Myrient is scheduled to shut down on March 31st, 2026.** This is primarily due to a lack of donations covering essential hosting and maintenance costs, further exacerbated by the rise of paywalled download managers that actively divert funds away from the preservationists who dedicate their time and money to server upkeep...
+> 
+> If Myrient and the broader mission of video game & software preservation matter to you, **PLEASE MAKE A DONATION TO MYRIENT AS SOON AS POSSIBLE** to potentially support their continued operation and fairly compensate the team for their immense efforts.
+> 
+> **[👉 Click here to Donate to Myrient](https://myrient.erista.me/donate/)**
+
 ## Features
 - **Multi-Platform Support**: Download ROMs/ISOs from multiple gaming platforms
   - Available platforms are easily extensible via YAML configuration

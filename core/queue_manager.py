@@ -1,5 +1,4 @@
 import os
-import pickle
 import re
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, QSize
 from PyQt5.QtWidgets import QTreeWidgetItem, QListWidgetItem
@@ -16,56 +15,22 @@ class QueueManager(QObject):
     def __init__(self):
         super().__init__()
         self.queue_items = []
-        self.config_dir = "config"
-        self.queue_file = os.path.join(self.config_dir, "queue.txt")
+        self.data_dir = os.path.join("MyrientDownloads", "data")
+        self.queue_file = os.path.join(self.data_dir, "queue.txt")
     
     def load_queue(self):
-        """Load the download queue from file."""
+        """Load the download queue from database."""
+        from core.database import AppDatabase
         try:
-            # Check if new format file exists
-            if os.path.exists(self.queue_file):
-                with open(self.queue_file, 'rb') as file:
-                    data = pickle.load(file)
-                    # Check if data is in new format (list of dicts)
-                    if data and isinstance(data[0], dict):
-                        self.queue_items = data
-                    else:
-                        # Convert old format to new
-                        self.queue_items = [{'name': name, 'size': ''} for name in data]
-            else:
-                # Check for old file in root directory
-                old_queue_file = "queue.txt"
-                if os.path.exists(old_queue_file):
-                    try:
-                        # Load from old location
-                        with open(old_queue_file, 'rb') as file:
-                            old_data = pickle.load(file)
-                            self.queue_items = [{'name': name, 'size': ''} for name in old_data]
-                        
-                        # Migrate to new location
-                        os.makedirs(self.config_dir, exist_ok=True)
-                        with open(self.queue_file, 'wb') as file:
-                            pickle.dump(self.queue_items, file)
-                        
-                        # Remove old file after successful migration
-                        os.remove(old_queue_file)
-                        print(f"Migrated queue to new format in {self.queue_file}")
-                    except Exception as e:
-                        print(f"Error migrating queue: {str(e)}")
-                        self.queue_items = []
-                else:
-                    self.queue_items = []
+            db = AppDatabase()
+            self.queue_items = db.get_queue()
         except Exception as e:
-            print(f"Error loading {self.queue_file}: {e}. Starting with an empty queue.")
+            print(f"Error loading queue from database: {e}. Starting with an empty queue.")
             self.queue_items = []
-        
         return self.queue_items
     
     def save_queue(self, queue_list_widget):
-        """Save the current queue to file."""
-        # Ensure config directory exists
-        os.makedirs(self.config_dir, exist_ok=True)
-        
+        """Save the current queue to database."""
         # Save both original names and file sizes
         queue_items = []
         for i in range(queue_list_widget.topLevelItemCount()):
@@ -76,8 +41,12 @@ class QueueManager(QObject):
             }
             queue_items.append(item_data)
         
-        with open(self.queue_file, 'wb') as file:
-            pickle.dump(queue_items, file)
+        try:
+            from core.database import AppDatabase
+            db = AppDatabase()
+            db.save_queue(queue_items)
+        except Exception as e:
+            print(f"Error saving queue to database: {e}")
         
         self.queue_items = queue_items
         self.queue_updated.emit()

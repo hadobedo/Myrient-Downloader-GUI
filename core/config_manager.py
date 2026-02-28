@@ -6,7 +6,7 @@ import requests
 class ConfigManager:
     """Manages application configuration loaded from YAML files."""
     
-    DEFAULT_CONFIG_PATH = "config/myrient_urls.yaml"
+    DEFAULT_CONFIG_PATH = "MyrientDownloads/config/myrient_urls.yaml"
     # Class variable to track if we've already printed the config loaded message
     _config_loaded_message_shown = False
     

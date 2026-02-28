@@ -108,24 +108,13 @@ class AppController(QObject):
     def _get_file_size_from_cache(self, platform_id, filename):
         """Get file size from cached JSON data."""
         try:
-            import json
-            import os
-            
-            json_file = os.path.join("config", f"{platform_id}_filelist.json")
-            if os.path.exists(json_file):
-                with open(json_file, 'r') as f:
-                    data = json.load(f)
-                    
-                    # Handle new format with file sizes
-                    if data and isinstance(data[0], dict):
-                        # Find the file in the data
-                        for file_info in data:
-                            if file_info.get('name') == filename:
-                                return file_info.get('size', '')
-                    # Handle old format - no sizes available
-                    elif data and isinstance(data[0], str):
-                        # Convert to new format with size fetching
-                        return self._fetch_file_size_for_item(f"({platform_id.upper()}) {filename}")
+            from core.database import AppDatabase
+            db = AppDatabase()
+            data = db.get_list_cache(platform_id)
+            if data and isinstance(data, list) and isinstance(data[0], dict):
+                for file_info in data:
+                    if file_info.get('name') == filename:
+                        return file_info.get('size', '')
         except Exception as e:
             print(f"Error getting file size from cache: {e}")
         

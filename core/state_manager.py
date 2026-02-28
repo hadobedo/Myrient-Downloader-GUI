@@ -6,7 +6,7 @@ from datetime import datetime
 class StateManager:
     """Manages application state persistence for pause/resume functionality."""
     
-    CONFIG_DIR = "config"
+    CONFIG_DIR = "MyrientDownloads/config"
     PAUSE_STATE_FILE = os.path.join(CONFIG_DIR, "pause_state.json")
     
     @staticmethod

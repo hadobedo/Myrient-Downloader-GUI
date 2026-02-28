@@ -97,12 +97,28 @@ def apply_theme(app):
     """Apply theme using Qt's built-in system with user preference."""
     global app_settings
     
-    # Ensure config directory exists
-    config_dir = './config'
+    # Migrate folders into MyrientDownloads if needed
+    base_dir = './MyrientDownloads'
+    config_dir = os.path.join(base_dir, 'config')
+    
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir, exist_ok=True)
+        
+    for folder in ['config', 'data', 'bin']:
+        old_path = f'./{folder}'
+        new_path = os.path.join(base_dir, folder)
+        if os.path.exists(old_path) and not os.path.exists(new_path):
+            import shutil
+            try:
+                shutil.move(old_path, new_path)
+                print(f"Migrated {folder}/ to MyrientDownloads/{folder}/")
+            except Exception as e:
+                print(f"Failed to migrate {folder}/ to MyrientDownloads: {e}")
+                
     if not os.path.exists(config_dir):
         os.makedirs(config_dir, exist_ok=True)
     
-    app_settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
+    app_settings = QSettings('./MyrientDownloads/config/myrientDownloaderGUI.ini', QSettings.IniFormat)
     
     # Get user preference: 'auto', 'light', 'dark', 'system' - default to 'dark'
     theme_preference = app_settings.value('appearance/theme', 'dark')

@@ -21,56 +21,19 @@ class GetSoftwareListThread(QThread):
     def __init__(self, url, json_file, fetch_sizes=True):
         super().__init__()
         self.url = url
-        # Ensure json file is in config directory
-        self.json_file = os.path.join("config", json_file)
+        self.platform_id = json_file
         self.fetch_sizes = fetch_sizes
 
     def run(self):
         file_data = []
         
-        # Ensure config directory exists
-        os.makedirs(os.path.dirname(self.json_file), exist_ok=True)
-        
-        # Check for file in new location
-        if os.path.exists(self.json_file):
-            try:
-                with open(self.json_file, 'r') as file:
-                    loaded_data = json.load(file)
-                    
-                    # Handle both old format (list of strings) and new format (list of dicts)
-                    if loaded_data and isinstance(loaded_data[0], str):
-                        # Convert old format to new format
-                        print(f"Converting {self.json_file} to new format with file sizes...")
-                        file_data = self._convert_old_format_to_new(loaded_data)
-                        # Save converted data
-                        with open(self.json_file, 'w') as file:
-                            json.dump(file_data, file, indent=2)
-                    else:
-                        file_data = loaded_data
-            except Exception as e:
-                print(f"Error loading {self.json_file}: {str(e)}")
-        else:
-            # Check for old file in root directory
-            old_file_path = os.path.basename(self.json_file)
-            if os.path.exists(old_file_path):
-                try:
-                    with open(old_file_path, 'r') as file:
-                        old_data = json.load(file)
-                        # Convert old format and add sizes
-                        file_data = self._convert_old_format_to_new(old_data)
-                    
-                    # Save to new location with new format
-                    with open(self.json_file, 'w') as file:
-                        json.dump(file_data, file, indent=2)
-                    
-                    # Remove old file after successful migration
-                    os.remove(old_file_path)
-                    print(f"Migrated file list from root to {self.json_file} with file sizes")
-                except Exception as e:
-                    print(f"Error migrating file list: {str(e)}")
-        
-        # Only fetch new list if empty or file doesn't exist
-        # Only fetch new list if empty or file doesn't exist
+        from core.database import AppDatabase
+        try:
+            db = AppDatabase()
+            file_data = db.get_list_cache(self.platform_id)
+        except Exception as e:
+            print(f"Error loading {self.platform_id} list cache: {e}")
+            
         if not file_data:
             try:
                 print(f"Fetching file list from {self.url}")
@@ -93,11 +56,12 @@ class GetSoftwareListThread(QThread):
                 
                 print(f"Found {len(file_data)} files with sizes")
                 
-                # Save the file with new format
-                with open(self.json_file, 'w') as file:
-                    json.dump(file_data, file, indent=2)
-                    
-                print(f"Saved file list to {self.json_file}")
+                try:
+                    db = AppDatabase()
+                    db.save_list_cache(self.platform_id, file_data)
+                    print(f"Saved file list to database for {self.platform_id}")
+                except Exception as e:
+                    print(f"Error saving to database: {e}")
                 
             except Exception as e:
                 print(f"Error fetching software list from {self.url}: {str(e)}")

@@ -412,7 +412,16 @@ class DirectoryManager:
         self.config_manager = config_manager
         
         # Root directory - configurable base for all downloads
-        self.root_dir = self.settings.value('directories/root_dir', 'MyrientDownloads')
+        
+        # Backward compatibility check: if MyrientDownloads exists and downloads doesn't, keep using MyrientDownloads
+        legacy_dir = 'MyrientDownloads'
+        default_dir = 'downloads'
+        if os.path.exists(legacy_dir) and not os.path.exists(default_dir):
+            default_root = legacy_dir
+        else:
+            default_root = default_dir
+            
+        self.root_dir = self.settings.value('directories/root_dir', default_root)
         
         # Processing directory - inside root download directory for better organization
         self.processing_dir = self.settings.value('directories/processing_dir', os.path.join(self.root_dir, 'processing'))
@@ -643,7 +652,8 @@ class SettingsManager:
     """Manages application settings and configuration."""
     
     def __init__(self, config_manager=None):
-        self.settings = QSettings('./config/myrientDownloaderGUI.ini', QSettings.IniFormat)
+        self._migrate_legacy_files()
+        self.settings = QSettings('./MyrientDownloads/config/myrientDownloaderGUI.ini', QSettings.IniFormat)
         
         # Store config_manager if provided
         self.config_manager = config_manager
@@ -713,6 +723,92 @@ class SettingsManager:
                     attr_name = f"{platform_id.lower()}_dir"
                     if hasattr(self.directory_manager, attr_name):
                         setattr(self, attr_name, getattr(self.directory_manager, attr_name))
+
+    def _migrate_legacy_files(self):
+        """Migrate files from old 'config/' structure to 'data/' and 'bin/'."""
+        import shutil
+        import glob
+        
+        old_config = os.path.join(os.getcwd(), 'MyrientDownloads', 'config')
+        if not os.path.exists(old_config):
+            return
+            
+        new_data = os.path.join(os.getcwd(), 'MyrientDownloads', 'data')
+        new_bin = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+        
+        os.makedirs(new_data, exist_ok=True)
+        os.makedirs(new_bin, exist_ok=True)
+        
+        # 1. Move queue.txt
+        old_queue = os.path.join(old_config, 'queue.txt')
+        new_queue = os.path.join(new_data, 'queue.txt')
+        if os.path.exists(old_queue) and not os.path.exists(new_queue):
+            try:
+                shutil.move(old_queue, new_queue)
+                print(f"Migrated queue.txt to {new_data}")
+            except Exception as e:
+                print(f"Failed to migrate queue.txt: {e}")
+                
+        # 2. Move *_filelist.json
+        for cache_file in glob.glob(os.path.join(old_config, '*_filelist.json')):
+            basename = os.path.basename(cache_file)
+            new_cache = os.path.join(new_data, basename)
+            if not os.path.exists(new_cache):
+                try:
+                    shutil.move(cache_file, new_cache)
+                    print(f"Migrated {basename} to {new_data}")
+                except Exception as e:
+                    print(f"Failed to migrate {basename}: {e}")
+                    
+        # 3. Move binaries
+        for binary in ['ps3dec.exe', 'extractps3iso.exe', 'extractps3iso', 'ps3dec']:
+            old_bin = os.path.join(old_config, binary)
+            new_bin_path = os.path.join(new_bin, binary)
+            if os.path.exists(old_bin) and not os.path.exists(new_bin_path):
+                try:
+                    shutil.move(old_bin, new_bin_path)
+                    print(f"Migrated {binary} to {new_bin}")
+                except Exception as e:
+                    print(f"Failed to migrate {binary}: {e}")
+                    
+        # 4. Migrate to SQLite
+        try:
+            from core.database import AppDatabase
+            import json
+            import pickle
+            
+            db = AppDatabase()
+            
+            # Migrate queue
+            if os.path.exists(new_queue):
+                try:
+                    with open(new_queue, 'rb') as file:
+                        data = pickle.load(file)
+                        if data and isinstance(data[0], dict):
+                            db.save_queue(data)
+                        elif data and isinstance(data[0], str):
+                            db.save_queue([{'name': name, 'size': ''} for name in data])
+                    os.remove(new_queue)
+                    print(f"Migrated queue.txt to SQLite")
+                except Exception as e:
+                    print(f"Failed to migrate queue.txt to SQLite: {e}")
+            
+            # Migrate list caches
+            for cache_file in glob.glob(os.path.join(new_data, '*_filelist.json')):
+                try:
+                    basename = os.path.basename(cache_file)
+                    platform_id = basename.split('_')[0]
+                    with open(cache_file, 'r') as file:
+                        data = json.load(file)
+                    if data:
+                        db.save_list_cache(platform_id, data)
+                    os.remove(cache_file)
+                    print(f"Migrated {basename} to SQLite")
+                except Exception as e:
+                    print(f"Failed to migrate {basename} to SQLite: {e}")
+                    
+        except ImportError:
+            pass # AppDatabase not available
     
     def _clean_up_duplicate_entries(self):
         """Clean up duplicate directory entries from the General section."""
@@ -795,11 +891,11 @@ class SettingsManager:
             self.ps3dec_binary = ps3dec_in_path
             self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
         else:
-            # Check if it's in the config directory
-            config_dir = os.path.join(os.getcwd(), 'config')
-            config_binary = os.path.join(config_dir, "ps3dec.exe")
-            if os.path.isfile(config_binary):
-                self.ps3dec_binary = config_binary
+            # Check if it's in the bin directory
+            bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+            bin_binary = os.path.join(bin_dir, "ps3dec.exe")
+            if os.path.isfile(bin_binary):
+                self.ps3dec_binary = bin_binary
                 self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
     
     def check_extractps3iso_binary(self):
@@ -819,7 +915,7 @@ class SettingsManager:
             self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)
         else:
             # Check if it's in the config directory first
-            config_dir = os.path.join(os.getcwd(), 'config')
+            config_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'config')
             config_binary = os.path.join(config_dir, binary_name)
             if os.path.isfile(config_binary):
                 self.extractps3iso_binary = config_binary
@@ -848,12 +944,12 @@ class SettingsManager:
                 import hashlib
                 print("Downloading PS3Dec from GitHub...")
                 
-                # Ensure config directory exists
-                config_dir = os.path.join(os.getcwd(), 'config')
-                os.makedirs(config_dir, exist_ok=True)
+                # Ensure bin directory exists
+                bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+                os.makedirs(bin_dir, exist_ok=True)
                 
-                # Download to config directory
-                ps3dec_path = os.path.join(config_dir, "ps3dec.exe")
+                # Download to bin directory
+                ps3dec_path = os.path.join(bin_dir, "ps3dec.exe")
                 urllib.request.urlretrieve(
                     "https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe",
                     ps3dec_path
@@ -945,14 +1041,14 @@ class SettingsManager:
                                         
                                         print(f"Found extractps3iso binary in TAR: {tar_file}")
                                         
-                                        # Ensure config directory exists
-                                        config_dir = os.path.join(os.getcwd(), 'config')
-                                        os.makedirs(config_dir, exist_ok=True)
+                                        # Ensure bin directory exists
+                                        bin_dir = os.path.join(os.getcwd(), 'bin')
+                                        os.makedirs(bin_dir, exist_ok=True)
                                         
-                                        # Extract the specific file to config directory
+                                        # Extract the specific file to bin directory
                                         member = tar_ref.getmember(tar_file)
                                         member.name = "extractps3iso.exe"  # Rename to standard name
-                                        tar_ref.extract(member, config_dir)
+                                        tar_ref.extract(member, bin_dir)
                                         
                                         extractps3iso_found = True
                                         break
@@ -975,13 +1071,13 @@ class SettingsManager:
                                 
                                 print(f"Found extractps3iso binary: {file}")
                                 
-                                # Ensure config directory exists
-                                config_dir = os.path.join(os.getcwd(), 'config')
-                                os.makedirs(config_dir, exist_ok=True)
+                                # Ensure bin directory exists
+                                bin_dir = os.path.join(os.getcwd(), 'bin')
+                                os.makedirs(bin_dir, exist_ok=True)
                                 
-                                # Extract the file to config directory
+                                # Extract the file to bin directory
                                 source = zip_ref.open(file)
-                                target_path = os.path.join(config_dir, "extractps3iso.exe")
+                                target_path = os.path.join(bin_dir, "extractps3iso.exe")
                                 
                                 with source, open(target_path, "wb") as target:
                                     shutil.copyfileobj(source, target)
@@ -996,9 +1092,9 @@ class SettingsManager:
                     pass  # Ignore cleanup errors
                 
                 if extractps3iso_found:
-                    # Update the binary path to config directory
-                    config_dir = os.path.join(os.getcwd(), 'config')
-                    extractps3iso_path = os.path.join(config_dir, "extractps3iso.exe")
+                    # Update the binary path to bin directory
+                    bin_dir = os.path.join(os.getcwd(), 'bin')
+                    extractps3iso_path = os.path.join(bin_dir, "extractps3iso.exe")
                     
                     self.extractps3iso_binary = extractps3iso_path
                     self.settings.setValue('binaries/extractps3iso_binary', self.extractps3iso_binary)

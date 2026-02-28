@@ -3,6 +3,7 @@ import signal
 import re
 import sys
 import json
+from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLineEdit, QTreeWidget, QTreeWidgetItem, QLabel, QCheckBox,
@@ -10,8 +11,8 @@ from PyQt5.QtWidgets import (
     QMessageBox, QListWidget, QListWidgetItem, QFormLayout, QDialogButtonBox, QGridLayout,
     QSplitter, QFrame, QSizePolicy, QComboBox
 )
-from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop, QTimer # Removed QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QFont, QBrush, QColor
+from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QEventLoop, QTimer, QUrl # Removed QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QFont, QBrush, QColor, QDesktopServices
 
 from gui.output_window import OutputWindow
 from core.settings import SettingsManager, SettingsDialog, BinaryValidationDialog
@@ -312,19 +313,18 @@ class GUIDownloader(QWidget):
         fetch_file_sizes = True  # Uses optimized batch processing for fast startup
         
         for platform_id, data in self.platforms.items():
-            json_filename = f"{platform_id}_filelist.json"
             thread = self.load_software_list(
                 data['url'],
-                json_filename,
+                platform_id,
                 lambda items, pid=platform_id: self.set_platform_list(pid, items),
                 fetch_sizes=fetch_file_sizes
             )
             self.platform_threads[platform_id] = thread
             thread.start()
 
-    def load_software_list(self, url, json_filename, setter, fetch_sizes=True):
+    def load_software_list(self, url, platform_id, setter, fetch_sizes=True):
         """Create and return a thread to load a software list."""
-        thread = GetSoftwareListThread(url, json_filename, fetch_sizes)
+        thread = GetSoftwareListThread(url, platform_id, fetch_sizes)
         thread.signal.connect(setter)
         return thread
     
@@ -395,18 +395,15 @@ class GUIDownloader(QWidget):
         """Load file sizes from JSON cache for a specific platform."""
         file_sizes = {}
         try:
-            json_file = f"config/{platform_id}_filelist.json"
-            if os.path.exists(json_file):
-                with open(json_file, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, list) and data:
-                        if isinstance(data[0], dict):
-                            # New format with sizes
-                            for item in data:
-                                name = item.get('name')
-                                size = item.get('size', '')
-                                if name:
-                                    file_sizes[name] = size
+            from core.database import AppDatabase
+            db = AppDatabase()
+            data = db.get_list_cache(platform_id)
+            if data and isinstance(data, list) and isinstance(data[0], dict):
+                for item in data:
+                    name = item.get('name')
+                    size = item.get('size', '')
+                    if name:
+                        file_sizes[name] = size
         except Exception as e:
             print(f"Error loading file sizes for {platform_id}: {e}")
         return file_sizes
@@ -686,12 +683,49 @@ class GUIDownloader(QWidget):
         self.output_frame = self.create_collapsible_output_section()
         main_layout.addWidget(self.output_frame) # Add the frame containing the text area
 
-        # ============ LOGS TOGGLE BUTTON (at the very bottom, right-justified) ============
-        logs_button_layout = QHBoxLayout()
-        logs_button_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
-        logs_button_layout.addStretch()
-        logs_button_layout.addWidget(self.output_toggle_button) # Add the pre-created button
-        main_layout.addLayout(logs_button_layout)
+        # ============ BOTTOM BUTTONS (Logs and Donate) ============
+        bottom_button_layout = QGridLayout()
+        bottom_button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Left side: Countdown label
+        self.countdown_button = QPushButton()
+        self.countdown_button.setFlat(True)
+        self.countdown_button.setCursor(Qt.PointingHandCursor)
+        self.countdown_button.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                border: none;
+                color: #d32f2f;
+                font-weight: bold;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                text-decoration: underline;
+                color: #b71c1c;
+            }
+        """)
+        self.countdown_button.clicked.connect(self.show_shutdown_warning)
+        bottom_button_layout.addWidget(self.countdown_button, 0, 0, alignment=Qt.AlignLeft)
+        
+        # Center: Donate Button
+        self.donate_button = QPushButton('DONATE TO MYRIENT')
+        self.donate_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://myrient.erista.me/donate/")))
+        
+        # Animation tracker for the flashing border
+        self._donate_flash_alpha = 0
+        self._donate_flash_direction = 10
+        
+        bottom_button_layout.addWidget(self.donate_button, 0, 1, alignment=Qt.AlignCenter)
+        
+        # Right side: Logs toggler
+        bottom_button_layout.addWidget(self.output_toggle_button, 0, 2, alignment=Qt.AlignRight)
+        
+        # Set column stretch so column 1 (center) takes up space, pushing 0/2 to edges
+        bottom_button_layout.setColumnStretch(0, 1)
+        bottom_button_layout.setColumnStretch(1, 0)
+        bottom_button_layout.setColumnStretch(2, 1)
+        
+        main_layout.addLayout(bottom_button_layout)
 
         self.setLayout(main_layout)
         self.setWindowTitle('Myrient Downloader')
@@ -714,7 +748,83 @@ class GUIDownloader(QWidget):
         # Initially hide the region filter
         region_group.setVisible(False)
         
+        # Setup countdown timer
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.timeout.connect(self.update_countdown)
+        self.countdown_timer.start(1000) # Update every second
+        self.update_countdown() # Initial update
+        
+        # Setup donate button flash timer (every 50ms for smooth fade)
+        self.donate_flash_timer = QTimer(self)
+        self.donate_flash_timer.timeout.connect(self.update_donate_flash)
+        self.donate_flash_timer.start(50)
+        
         self.show()
+    
+    def update_donate_flash(self):
+        """Fade the green border on the donate button in and out."""
+        self._donate_flash_alpha += self._donate_flash_direction
+        
+        if self._donate_flash_alpha >= 255:
+            self._donate_flash_alpha = 255
+            self._donate_flash_direction = -10
+        elif self._donate_flash_alpha <= 0:
+            self._donate_flash_alpha = 0
+            self._donate_flash_direction = 10
+            
+        self.donate_button.setStyleSheet(f"""
+            QPushButton {{
+                border: 2px solid rgba(76, 175, 80, {self._donate_flash_alpha / 255.0:.2f});
+                border-radius: 4px;
+            }}
+        """)
+            
+    def update_countdown(self):
+        """Update the Myrient shutdown countdown timer."""
+        now = datetime.now()
+        shutdown_date = datetime(2026, 3, 31)
+        if now >= shutdown_date:
+            self.countdown_button.setText("Myrient has officially shut down.")
+            self.countdown_timer.stop()
+            return
+            
+        remaining = shutdown_date - now
+        days = remaining.days
+        hours, remainder = divmod(remaining.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        self.countdown_button.setText(f"Myrient shuts down in: {days}d {hours}h {minutes}m {seconds}s")
+        
+    def show_shutdown_warning(self):
+        """Show the Myrient shutdown warning dialog with a donate button."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Myrient Shutdown Notice")
+        dialog.setMinimumWidth(550)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
+        
+        warning_label = QLabel(
+            "Unfortunately, Myrient is scheduled to shut down on March 31st, 2026. This is primarily due to a lack of "
+            "donations towards covering essential hosting and maintenance costs, further exacerbated by the rise of "
+            "paywalled download managers that actively DIVERT FUNDS AWAY from the preservationists who dedicate their time and money to server upkeep & other related tasks.\n\n"
+            "If Myrient and the broader mission of video game and software preservation matter to you, "
+            "PLEASE MAKE A DONATION AS SOON AS POSSIBLE to potentially support their continued operation "
+            "and fairly compensate the team for their immense efforts over the last few years."
+        )
+        warning_label.setWordWrap(True)
+        warning_label.setStyleSheet("font-size: 14px;")
+        layout.addWidget(warning_label)
+        
+        donate_btn = QPushButton("Donate to Myrient")
+        donate_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://myrient.erista.me/donate/")))
+        donate_btn.clicked.connect(dialog.accept) # Close dialog after clicking
+        
+        layout.addWidget(donate_btn)
+        dialog.setLayout(layout)
+        dialog.adjustSize()
+        dialog.exec_()
     
     def create_collapsible_output_section(self):
         """Create a collapsible output window section."""
