@@ -6,7 +6,7 @@ GUI that manages the downloading and processing video game ROMs/ISOs from [Myrie
 > 
 > If Myrient and the broader mission of video game & software preservation matter to you, **PLEASE MAKE A DONATION TO MYRIENT AS SOON AS POSSIBLE** to potentially support their continued operation and fairly compensate the team for their immense efforts.
 > 
-> **[👉 Click here to Donate to Myrient](https://myrient.erista.me/donate/)**
+> **[CLICK HERE TO DONATE TO MYRIENT](https://myrient.erista.me/donate/)**
 
 ## Features
 - **Multi-Platform Support**: Download ROMs/ISOs from multiple gaming platforms
