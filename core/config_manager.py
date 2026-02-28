@@ -1,7 +1,6 @@
 import os
 import yaml
 import sys
-import requests
 
 class ConfigManager:
     """Manages application configuration loaded from YAML files."""
@@ -9,6 +8,42 @@ class ConfigManager:
     DEFAULT_CONFIG_PATH = "MyrientDownloads/config/myrient_urls.yaml"
     # Class variable to track if we've already printed the config loaded message
     _config_loaded_message_shown = False
+    
+    # Textual fallback in case GitHub is unreachable
+    DEFAULT_URLS_YAML_CONTENT = """# Default configuration for Myrient URLs
+# You can add more platforms here as needed!
+
+ps3:
+  tab_name: "PS3 (ISO)"
+  url: "https://f3.erista.me/files/Redump/Sony - PlayStation 3"
+  dkeys: "https://f3.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/"
+  show_ps3dec: true
+
+psn:
+  tab_name: "PS3/PSN (PKG)"
+  url: "https://f3.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
+  show_pkg_split: true
+
+ps2:
+  tab_name: "PS2 (ISO)"  
+  url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%202/"
+
+psx:
+  tab_name: "PSX (ISO)"
+  url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation/"
+
+psp:
+  tab_name: "PSP (ISO)"
+  url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%20Portable/"
+
+gamecube:
+  tab_name: "GameCube (RVZ)"
+  url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20GameCube%20-%20NKit%20RVZ%20[zstd-19-128k]/"
+
+wii:
+  tab_name: "Wii (RVZ)"
+  url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20-%20NKit%20RVZ%20[zstd-19-128k]/"
+"""
     
     def __init__(self, config_file=None):
         self.config_file = config_file or self.DEFAULT_CONFIG_PATH
@@ -50,35 +85,24 @@ class ConfigManager:
         if os.path.exists(self.config_file):
             return
         
-        # Neither location has the config, download from GitHub
+        # Neither location has the config, generate default
         sys.stderr.write(f"Configuration file not found at {self.config_file}\n")
-        sys.stderr.write(f"Downloading configuration file from GitHub...\n")
+        sys.stderr.write("Generating default myrient_urls.yaml configuration offline.\n")
         sys.stderr.flush()
-        
-        github_url = "https://raw.githubusercontent.com/hadobedo/Myrient-Downloader-GUI/main/config/myrient_urls.yaml"
         
         try:
             # Create config directory if it doesn't exist
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
             
-            # Download the file
-            response = requests.get(github_url)
-            if response.status_code == 200:
-                with open(self.config_file, 'wb') as f:
-                    f.write(response.content)
-                sys.stderr.write(f"Successfully downloaded configuration file to {self.config_file}\n")
-                sys.stderr.flush()
-                return
-            else:
-                sys.stderr.write(f"Failed to download configuration file: HTTP {response.status_code}\n")
+            # Write default configuration
+            with open(self.config_file, 'w') as f:
+                f.write(self.DEFAULT_URLS_YAML_CONTENT)
+            sys.stderr.write(f"Successfully generated default configuration file to {self.config_file}\n")
+            sys.stderr.flush()
+            return
         except Exception as e:
-            sys.stderr.write(f"Error downloading configuration file: {str(e)}\n")
-        
-        sys.stderr.write("Please ensure the myrient_urls.yaml file is present in the config directory.\n")
-        sys.stderr.write("The application requires this file to function properly.\n")
-        sys.stderr.flush()
-        # Initialize with empty config if download failed
-        self.config = {}
+            sys.stderr.write(f"Error creating default configuration file: {str(e)}\n")
+            self.config = {}
     
     def get_platform_checkbox_settings(self, platform_id):
         """Get checkbox visibility settings for a platform."""
