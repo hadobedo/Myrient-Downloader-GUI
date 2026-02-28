@@ -704,6 +704,7 @@ class SettingsManager:
     def _setup_directory_properties(self):
         """Setup directory properties for backwards compatibility."""
         # Root and processing directories
+        self.root_dir = self.directory_manager.root_dir
         self.myrient_base_dir = self.directory_manager.root_dir
         self.processing_dir = self.directory_manager.processing_dir
         
@@ -1042,7 +1043,7 @@ class SettingsManager:
                                         print(f"Found extractps3iso binary in TAR: {tar_file}")
                                         
                                         # Ensure bin directory exists
-                                        bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+                                        bin_dir = os.path.join(self.root_dir, 'bin')
                                         os.makedirs(bin_dir, exist_ok=True)
                                         
                                         # Extract the specific file to bin directory
@@ -1072,7 +1073,7 @@ class SettingsManager:
                                 print(f"Found extractps3iso binary: {file}")
                                 
                                 # Ensure bin directory exists
-                                bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+                                bin_dir = os.path.join(self.root_dir, 'bin')
                                 os.makedirs(bin_dir, exist_ok=True)
                                 
                                 # Extract the file to bin directory
@@ -1093,7 +1094,7 @@ class SettingsManager:
                 
                 if extractps3iso_found:
                     # Update the binary path to bin directory
-                    bin_dir = os.path.join(os.getcwd(), 'MyrientDownloads', 'bin')
+                    bin_dir = os.path.join(self.root_dir, 'bin')
                     extractps3iso_path = os.path.join(bin_dir, "extractps3iso.exe")
                     
                     self.extractps3iso_binary = extractps3iso_path
