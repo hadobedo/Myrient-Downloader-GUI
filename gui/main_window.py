@@ -140,7 +140,6 @@ class SortableTreeWidgetItem(QTreeWidgetItem):
                 return 0
             
             # Extract number and unit using regex
-            import re
             match = re.match(r'([0-9,]+\.?[0-9]*)\s*([A-Z]*)', size_text)
             if not match:
                 return 0
@@ -191,11 +190,6 @@ class GUIDownloader(QWidget):
             self.config_manager = ConfigManager()
             if not self.config_manager:
                 raise RuntimeError("Failed to initialize ConfigManager")
-            
-            # Initialize managers
-            self.settings_manager = SettingsManager(config_manager=self.config_manager)
-            if not self.settings_manager:
-                raise RuntimeError("Failed to initialize SettingsManager")
             
             # Initialize the rest of the application
             self._init_application()
@@ -529,11 +523,6 @@ class GUIDownloader(QWidget):
         self.result_list.currentChanged.connect(self.update_checkboxes_for_platform)
         software_layout.addWidget(self.result_list)
 
-        # Connect the itemSelectionChanged signals
-        for i in range(self.result_list.count()):
-            self.result_list.widget(i).itemSelectionChanged.connect(self.update_add_to_queue_button)
-            self.result_list.widget(i).setSelectionMode(QAbstractItemView.ExtendedSelection)
-
         # Add to queue button
         self.add_to_queue_button = QPushButton('Add to Queue')
         self.add_to_queue_button.clicked.connect(self.add_to_queue)
@@ -726,9 +715,6 @@ class GUIDownloader(QWidget):
         region_group.setVisible(False)
         
         self.show()
-        
-        # Store region group reference for toggling visibility
-        self.region_filter_group = region_group
     
     def create_collapsible_output_section(self):
         """Create a collapsible output window section."""
@@ -895,133 +881,6 @@ class GUIDownloader(QWidget):
         
         # PSN checkbox
         self.split_pkg_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_pkg', state))
-
-    def create_options_grid(self, parent_layout):
-        """Create the options layout with sections for general and platform-specific options."""
-        # Create group box for general options
-        general_options_group = QGroupBox("General Options")
-        # Add padding to the group box title with style sheet
-        general_options_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; }")
-        general_layout = QVBoxLayout()
-        
-        # Create a grid layout for general options
-        general_grid = QGridLayout()
-        general_grid.setHorizontalSpacing(20)  # Space between columns
-        general_grid.setVerticalSpacing(10)    # Space between rows
-        
-        # Add general options - Keep related options next to each other
-        row = 0
-        self.split_checkbox = QCheckBox('Split for FAT32 (if > 4GB)', self)
-        self.split_checkbox.setChecked(self.settings_manager.split_large_files)
-        general_grid.addWidget(self.split_checkbox, row, 0)
-        
-        self.keep_unsplit_dec_checkbox = QCheckBox('Keep unsplit file', self)
-        self.keep_unsplit_dec_checkbox.setChecked(self.settings_manager.keep_unsplit_file)
-        general_grid.addWidget(self.keep_unsplit_dec_checkbox, row, 1)
-        
-        # Add universal content organization option
-        row += 1
-        self.organize_content_checkbox = QCheckBox('Group downloaded files per game', self)
-        self.organize_content_checkbox.setChecked(self.settings_manager.organize_content_to_folders)
-        general_grid.addWidget(self.organize_content_checkbox, row, 0, 1, 2)  # Span 2 columns
-        
-        # Add the grid layout to the main layout
-        general_layout.addLayout(general_grid)
-        general_options_group.setLayout(general_layout)
-        parent_layout.addWidget(general_options_group)
-        
-        # Create group box for platform-specific options
-        self.platform_options_group = QGroupBox("Platform-Specific Options")
-        self.platform_options_group.setStyleSheet("QGroupBox { padding-top: 15px; margin-top: 5px; }")
-        platform_layout = QVBoxLayout()
-        
-        # PS3 specific options
-        self.ps3_options_widget = QWidget()
-        ps3_layout = QVBoxLayout(self.ps3_options_widget)
-        ps3_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create a grid layout for PS3 options with better organization and visual hierarchy
-        ps3_grid = QGridLayout()
-        ps3_grid.setHorizontalSpacing(20)
-        ps3_grid.setVerticalSpacing(10)
-        
-        # First row - main decrypt checkbox with its direct related options
-        row = 0
-        self.decrypt_checkbox = QCheckBox('Decrypt using PS3Dec', self)
-        self.decrypt_checkbox.setChecked(self.settings_manager.decrypt_iso)
-        ps3_grid.addWidget(self.decrypt_checkbox, row, 0)
-        
-        self.keep_enc_checkbox = QCheckBox('Keep encrypted PS3 ISO', self)
-        self.keep_enc_checkbox.setChecked(self.settings_manager.keep_encrypted_iso)
-        ps3_grid.addWidget(self.keep_enc_checkbox, row, 1)
-        
-        # Second row - Extract ISO contents checkbox
-        row += 1
-        self.extract_ps3_checkbox = QCheckBox('Extract ISO using extractps3iso', self)
-        self.extract_ps3_checkbox.setChecked(self.settings_manager.extract_ps3_iso)
-        ps3_grid.addWidget(self.extract_ps3_checkbox, row, 0, 1, 2)  # Span 2 columns
-        
-        # Third row - Keep decrypted ISO checkbox
-        row += 1
-        self.keep_decrypted_iso_checkbox = QCheckBox('Keep decrypted ISO after extraction', self)
-        self.keep_decrypted_iso_checkbox.setChecked(self.settings_manager.keep_decrypted_iso_after_extraction)
-        ps3_grid.addWidget(self.keep_decrypted_iso_checkbox, row, 0, 1, 2)  # Span 2 columns
-        
-        # Separate row just for the dkey checkbox with clear separation
-        row += 1
-        # Add a small spacer before the dkey checkbox for visual separation
-        ps3_grid.setRowMinimumHeight(row, 5)  # 5px spacing
-        
-        row += 1
-        self.keep_dkey_checkbox = QCheckBox('Keep PS3 ISO dkey file', self)
-        self.keep_dkey_checkbox.setChecked(self.settings_manager.keep_dkey_file)
-        # Place in first column, and make it span two columns for clarity
-        ps3_grid.addWidget(self.keep_dkey_checkbox, row, 0, 1, 2)
-    
-        # Add PS3 grid to PS3 layout
-        ps3_layout.addLayout(ps3_grid)
-        platform_layout.addWidget(self.ps3_options_widget)
-        
-        # PSN specific options
-        self.psn_options_widget = QWidget()
-        psn_layout = QGridLayout(self.psn_options_widget)
-        psn_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.split_pkg_checkbox = QCheckBox('Split PKG', self)
-        self.split_pkg_checkbox.setChecked(self.settings_manager.split_pkg)
-        psn_layout.addWidget(self.split_pkg_checkbox, 0, 0)
-        
-        platform_layout.addWidget(self.psn_options_widget)
-        
-        # Add stretch to push everything to the top
-        platform_layout.addStretch()
-        
-        self.platform_options_group.setLayout(platform_layout)
-        parent_layout.addWidget(self.platform_options_group)
-        
-        # Connect signals for all checkboxes AFTER all are created
-        # Connect General group checkboxes
-        self.split_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_large_files', state))
-        self.keep_unsplit_dec_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_unsplit_file', state))
-        self.organize_content_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('organize_content_to_folders', state))
-        
-        # Connect PS3 group checkboxes
-        self.decrypt_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('decrypt_iso', state))
-        self.extract_ps3_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('extract_ps3_iso', state))
-        self.keep_enc_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_encrypted_iso', state))
-        self.keep_dkey_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('keep_dkey_file', state))
-        self.keep_decrypted_iso_checkbox.stateChanged.connect(lambda state:
-            self.handle_checkbox_change('keep_decrypted_iso_after_extraction', state))
-    
-        # Connect PSN group checkbox
-        self.split_pkg_checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change('split_pkg', state))
-        
-        # Set initial visibility states for all checkboxes
-        self.update_all_checkbox_states()
-        
-        # Initially hide platform-specific options - they will be shown based on platform
-        self.ps3_options_widget.setVisible(False)
-        self.psn_options_widget.setVisible(False)
 
     def handle_checkbox_change(self, setting_name, state):
         """Handle checkbox state changes in a centralized way."""

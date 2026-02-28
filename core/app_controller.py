@@ -1,5 +1,7 @@
 import os
 import re
+
+from core.utils import format_file_size
 from typing import List
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from PyQt5.QtWidgets import QMessageBox
@@ -524,6 +526,11 @@ class AppController(QObject):
             if self.is_paused:
                 return
             
+            # Skip processing if download failed (returns None)
+            if file_path is None:
+                self.output_window.append(f"({queue_position}) Download failed for {filename}, skipping processing")
+                return
+            
             # Process the downloaded file
             self.current_operation = 'processing'
             self._process_downloaded_file(platform_id, file_path, filename, queue_position, settings, queue_item)
@@ -831,11 +838,4 @@ class AppController(QObject):
 
     def _format_file_size(self, size_bytes):
         """Format file size for display."""
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.1f} GB"
+        return format_file_size(size_bytes)

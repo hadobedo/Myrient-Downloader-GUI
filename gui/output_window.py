@@ -124,7 +124,7 @@ class OutputWindow(QTextEdit):
             cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 50000)  # Delete oldest 50K chars
             cursor.removeSelectedText()
         
-        QApplication.processEvents()
+        
     
     def forceScrollToBottom(self):
         """Force the text edit to scroll to the bottom."""

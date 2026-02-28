@@ -5,6 +5,19 @@ from PyQt5.QtCore import QObject, pyqtSignal, QEventLoop
 
 from threads.download_threads import DownloadThread
 from gui.overwrite_dialog import OverwriteManager
+from core.utils import format_file_size
+
+# Shared headers for all Myrient HTTP requests to avoid triggering abuse detection.
+# Myrient throttles bare python-requests User-Agent to 10 KB/s.
+MYRIENT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'keep-alive',
+    'Referer': 'https://myrient.erista.me/',
+}
 
 
 class DownloadManager(QObject):
@@ -37,7 +50,7 @@ class DownloadManager(QObject):
             local_file_size = os.path.getsize(local_path)
             
             # Get the size of the remote file
-            response = requests.head(url)
+            response = requests.head(url, headers=MYRIENT_HEADERS, timeout=10, allow_redirects=True)
             if 'content-length' in response.headers:
                 remote_file_size = int(response.headers['content-length'])
                 
@@ -58,22 +71,14 @@ class DownloadManager(QObject):
     def get_remote_file_size(url):
         """Get the size of a remote file without downloading it."""
         try:
-            # Set up headers to mimic a browser
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': '*/*',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive'
-            }
-            
             # Try HEAD request first (faster)
-            response = requests.head(url, timeout=5, headers=headers, allow_redirects=True)
+            response = requests.head(url, timeout=5, headers=MYRIENT_HEADERS, allow_redirects=True)
             if response.status_code == 200 and 'content-length' in response.headers:
                 return int(response.headers['content-length'])
             
             # If HEAD fails, try GET with range to get just the headers
-            headers['Range'] = 'bytes=0-0'
-            response = requests.get(url, timeout=5, headers=headers, allow_redirects=True)
+            headers_with_range = {**MYRIENT_HEADERS, 'Range': 'bytes=0-0'}
+            response = requests.get(url, timeout=5, headers=headers_with_range, allow_redirects=True)
             if response.status_code in [200, 206, 416] and 'content-range' in response.headers:
                 # Parse content-range header: "bytes 0-0/12345"
                 content_range = response.headers['content-range']
@@ -99,59 +104,6 @@ class DownloadManager(QObject):
             encoded_filename = filename
         # Ensure base_url does not end with a slash, as we add one.
         return f"{base_url.rstrip('/')}/{encoded_filename}"
-
-    @staticmethod
-    def try_alternative_domains(original_platform_url, filename_for_testing):
-        """
-        Tries to find a working download domain for the given platform URL and filename.
-        Returns a base URL (without trailing slash) for DownloadManager.build_download_url.
-        """
-        parsed_original = urllib.parse.urlparse(original_platform_url)
-        original_scheme = parsed_original.scheme
-        original_host = parsed_original.hostname
-        
-        # path_from_original is already URL-encoded if original_platform_url was.
-        # e.g., /files/No-Intro/Nintendo%20-%20Game%20Boy%20Color/
-        path_from_original = parsed_original.path
-        
-        # base_path_for_candidates will be like /files/No-Intro/Nintendo%20-%20Game%20Boy%20Color
-        base_path_for_candidates = path_from_original.rstrip('/')
-
-        # This is the base URL structure derived from the original_platform_url.
-        # e.g., "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Color"
-        default_candidate_base = f"{original_scheme}://{original_host}{base_path_for_candidates}"
-
-        alternative_hosts = []
-        for i in range(10):
-            alternative_hosts.append(f"download{i}.mtcontent.rs")
-        for i in range(10):
-            alternative_hosts.append(f"cache{i}.mtcontent.rs")
-
-        # 1. Test the original URL's structure first.
-        #    This handles cases like PS3 using dlX.myrient.erista.me which might be direct.
-        if original_host:
-            test_url_original = DownloadManager.build_download_url(default_candidate_base, filename_for_testing)
-            try:
-                response = requests.head(test_url_original, timeout=2, allow_redirects=True)
-                if response.status_code == 200:
-                    return default_candidate_base
-            except requests.exceptions.RequestException:
-                pass # Continue to mtcontent.rs alternatives
-
-        # 2. Try alternative mtcontent.rs domains.
-        for alt_host in alternative_hosts:
-            # candidate_dl_base will be like "https://downloadX.mtcontent.rs/files/No-Intro/Nintendo%20-%20Game%20Boy%20Color"
-            candidate_dl_base = f"https://{alt_host}{base_path_for_candidates}"
-            test_url_alt = DownloadManager.build_download_url(candidate_dl_base, filename_for_testing)
-            try:
-                response = requests.head(test_url_alt, timeout=1.5, allow_redirects=True)
-                if response.status_code == 200:
-                    return candidate_dl_base # Return the base part, e.g., https://downloadX.mtcontent.rs/path
-            except requests.exceptions.RequestException:
-                continue
-        
-        # 3. Fallback to the original URL structure if no alternatives worked.
-        return default_candidate_base
 
     @staticmethod
     def get_base_name(filename):
@@ -184,8 +136,7 @@ class DownloadManager(QObject):
         """
         self.current_operation = 'download'
         
-        effective_base_url = DownloadManager.try_alternative_domains(base_download_url_for_platform, selected_iso_filename)
-        download_url = DownloadManager.build_download_url(effective_base_url, selected_iso_filename)
+        download_url = DownloadManager.build_download_url(base_download_url_for_platform, selected_iso_filename)
         
         base_name_no_ext = DownloadManager.get_base_name(selected_iso_filename) # e.g., "Game Name (Region)"
 
@@ -312,7 +263,7 @@ class DownloadManager(QObject):
         
         # Get remote file size for initial display
         try:
-            response = requests.head(download_url)
+            response = requests.head(download_url, headers=MYRIENT_HEADERS, timeout=10, allow_redirects=True)
             if 'content-length' in response.headers:
                 remote_size = int(response.headers['content-length'])
                 if queue_item:
@@ -326,6 +277,10 @@ class DownloadManager(QObject):
         self.download_thread.eta_signal.connect(self.eta_updated.emit)
         self.download_thread.size_signal.connect(self._handle_size_update)
         self.download_thread.download_paused_signal.connect(self.download_paused.emit)
+
+        # Track whether the download succeeded
+        self._download_success = True
+        self.download_thread.download_error_signal.connect(self._handle_download_error)
         
         # Store file path for pause/resume
         self.current_file_path = zip_file_path
@@ -342,8 +297,17 @@ class DownloadManager(QObject):
         if not self.is_paused:
             self.current_operation = None
             self.current_file_path = None
+
+        # Return None on failure to prevent processing of incomplete files
+        if not self._download_success:
+            return None
             
         return zip_file_path
+    
+    def _handle_download_error(self, error_message):
+        """Handle download error: mark failure and propagate to caller."""
+        self._download_success = False
+        self.error_occurred.emit(f"Download failed: {error_message}")
     
     def pause_download(self):
         """Pause the current download."""
@@ -440,11 +404,4 @@ class DownloadManager(QObject):
 
     def _format_file_size(self, size_bytes):
         """Format file size for display."""
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.1f} GB"
+        return format_file_size(size_bytes)

@@ -8,13 +8,15 @@ from pathlib import Path
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex, QWaitCondition
 from PyQt5.QtWidgets import QApplication
 
+from core.utils import generate_unique_filename
+
 
 class SplitPkgThread(QThread):
     progress = pyqtSignal(str)
     status = pyqtSignal(bool)
 
     def __init__(self, file_path, overwrite_manager=None):
-        QThread.__init__(self)
+        super().__init__()
         self.file_path = file_path
         self.overwrite_manager = overwrite_manager
     def run(self):
@@ -52,19 +54,22 @@ class SplitPkgThread(QThread):
                         return
                     # If OVERWRITE or RENAME, continue with splitting
             
+            BUFFER_SIZE = 8 * 1024 * 1024  # 8MB read buffer
             with open(self.file_path, 'rb') as f:
-                i = 0
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
+                for i in range(num_parts):
+                    part_size = min(chunk_size, file_size - (i * chunk_size))
                     split_file_path = os.path.join(os.path.dirname(self.file_path), f"{Path(self.file_path).stem}.pkg.666{str(i).zfill(2)}")
+                    bytes_written = 0
                     with open(split_file_path, 'wb') as chunk_file:
-                        chunk_file.write(chunk)
+                        while bytes_written < part_size:
+                            read_size = min(BUFFER_SIZE, part_size - bytes_written)
+                            data = f.read(read_size)
+                            if not data:
+                                break
+                            chunk_file.write(data)
+                            bytes_written += len(data)
                     progress_text = f"Splitting {self.file_path}: part {i+1}/{num_parts} complete"
-                    # print(progress_text)  # Removed: This will be handled by the connected signal
                     self.progress.emit(progress_text)
-                    i += 1
             os.remove(self.file_path)
             self.status.emit(True)
 
@@ -74,7 +79,7 @@ class SplitIsoThread(QThread):
     status = pyqtSignal(bool)
 
     def __init__(self, file_path):
-        QThread.__init__(self)
+        super().__init__()
         self.file_path = file_path
 
     def run(self):
@@ -85,18 +90,22 @@ class SplitIsoThread(QThread):
         else:
             chunk_size = 4294967295
             num_parts = -(-file_size // chunk_size)
+            BUFFER_SIZE = 8 * 1024 * 1024  # 8MB read buffer
             with open(self.file_path, 'rb') as f:
-                i = 0
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                    with open(f"{os.path.splitext(self.file_path)[0]}.iso.{str(i)}", 'wb') as chunk_file:
-                        chunk_file.write(chunk)
+                for i in range(num_parts):
+                    part_size = min(chunk_size, file_size - (i * chunk_size))
+                    split_path = f"{os.path.splitext(self.file_path)[0]}.iso.{str(i)}"
+                    bytes_written = 0
+                    with open(split_path, 'wb') as chunk_file:
+                        while bytes_written < part_size:
+                            read_size = min(BUFFER_SIZE, part_size - bytes_written)
+                            data = f.read(read_size)
+                            if not data:
+                                break
+                            chunk_file.write(data)
+                            bytes_written += len(data)
                     progress_text = f"Splitting {self.file_path}: part {i+1}/{num_parts} complete"
-                    # print(progress_text)  # Removed: This will be handled by the connected signal
                     self.progress.emit(progress_text)
-                    i += 1
             self.status.emit(True)
 
 
@@ -440,14 +449,4 @@ class UnzipRunner(QThread):
     
     def _generate_unique_filename(self, file_path):
         """Generate a unique filename by adding a suffix."""
-        directory = os.path.dirname(file_path)
-        filename = os.path.basename(file_path)
-        name, ext = os.path.splitext(filename)
-        
-        counter = 1
-        while True:
-            new_filename = f"{name} ({counter}){ext}"
-            new_path = os.path.join(directory, new_filename)
-            if not os.path.exists(new_path):
-                return new_path
-            counter += 1
+        return generate_unique_filename(file_path)

@@ -7,13 +7,13 @@
 
 ps3:
   tab_name: "PS3 (ISO)"
-  url: "https://dl10.myrient.erista.me/files/Redump/Sony - PlayStation 3"
-  dkeys: "https://dl10.myrient.erista.me/files/Redump/Sony - PlayStation 3 - Disc Keys TXT/"
+  url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203/"
+  dkeys: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%203%20-%20Disc%20Keys%20TXT/"
   show_ps3dec: true
 
 psn:
   tab_name: "PS3/PSN (PKG)"
-  url: "https://dl8.myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)"
+  url: "https://myrient.erista.me/files/No-Intro/Sony%20-%20PlayStation%203%20(PSN)%20(Content)/"
   show_pkg_split: true
 
 ps2:

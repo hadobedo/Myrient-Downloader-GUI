@@ -1,8 +1,10 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                             QPushButton, QCheckBox, QFrame, QScrollArea, QWidget)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QObject, QMutex, QWaitCondition, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 import os
+
+from core.utils import format_file_size
 
 
 class OverwriteDialog(QDialog):
@@ -182,14 +184,7 @@ class OverwriteDialog(QDialog):
         """Format file size in human-readable format."""
         if size_bytes == 0:
             return "Unknown"
-        elif size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.1f} GB"
+        return format_file_size(size_bytes)
     
     @staticmethod
     def ask_overwrite(conflicts, operation_type="processing", parent=None):
@@ -273,3 +268,78 @@ class OverwriteManager:
             return False
         else:  # CANCEL or RENAME
             return None  # Indicates cancellation
+
+
+class ThreadSafeOverwriteManager(QObject):
+    """Thread-safe overwrite manager that delegates dialog display to the main thread.
+
+    Worker threads call handle_conflict() which emits a signal and blocks via
+    QMutex/QWaitCondition until the main thread processes the request and calls
+    provide_response().
+    """
+
+    # Signal: emitted from worker thread, connected to main-thread slot
+    conflict_request = pyqtSignal(object, str)  # (conflict_info, operation_type)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._mutex = QMutex()
+        self._wait_condition = QWaitCondition()
+        self._response_choice = OverwriteDialog.CANCEL
+        self._response_apply_all = False
+        self.global_choice = None
+        self.apply_to_all = False
+
+    def reset(self):
+        """Reset global choices."""
+        self.global_choice = None
+        self.apply_to_all = False
+
+    def handle_conflict(self, conflict_info, operation_type="processing", parent=None):
+        """Thread-safe conflict handler. Blocks the calling thread until a response
+        is provided by the main thread via provide_response().
+
+        Args:
+            conflict_info: Dictionary with conflict details or file path string
+            operation_type: Type of operation (downloading, extraction, processing)
+            parent: Ignored (dialog parent is determined by the main-thread handler)
+
+        Returns:
+            Tuple of (action, apply_to_all)
+        """
+        # If we have a global choice that applies to all, return immediately (no dialog needed)
+        if self.global_choice is not None and self.apply_to_all:
+            return self.global_choice, True
+
+        # Emit signal to request dialog from main thread, then block
+        self._mutex.lock()
+        try:
+            self.conflict_request.emit(conflict_info, operation_type)
+            # Block until main thread calls provide_response()
+            self._wait_condition.wait(self._mutex)
+            choice = self._response_choice
+            apply_all = self._response_apply_all
+        finally:
+            self._mutex.unlock()
+
+        # Store global choice if apply to all is selected
+        if apply_all:
+            self.global_choice = choice
+            self.apply_to_all = True
+
+        return choice, apply_all
+
+    def provide_response(self, choice, apply_to_all=False):
+        """Called from the MAIN THREAD to unblock the waiting worker thread.
+
+        Args:
+            choice: One of OverwriteDialog.OVERWRITE, SKIP, RENAME, CANCEL
+            apply_to_all: Whether to apply this choice to all future conflicts
+        """
+        self._mutex.lock()
+        try:
+            self._response_choice = choice
+            self._response_apply_all = apply_to_all
+            self._wait_condition.wakeAll()
+        finally:
+            self._mutex.unlock()

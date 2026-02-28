@@ -7,9 +7,10 @@ from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtGui import QColor
 
 from core.ps3_fileprocessor import PS3FileProcessor
+from core.utils import generate_unique_filename, generate_unique_dirname
 from threads.processing_threads import UnzipRunner, CommandRunner, SplitIsoThread, SplitPkgThread
 from core.settings import BinaryValidationDialog
-from gui.overwrite_dialog import OverwriteManager, OverwriteDialog
+from gui.overwrite_dialog import OverwriteManager, OverwriteDialog, ThreadSafeOverwriteManager
 
 
 class ProcessingManager(QObject):
@@ -32,6 +33,19 @@ class ProcessingManager(QObject):
         self.unzip_runner = None
         self.processors = {}  # Cache processors by platform
         self.overwrite_manager = OverwriteManager()
+
+        # Thread-safe overwrite manager for worker threads (UnzipRunner, SplitPkgThread)
+        self._thread_safe_overwrite_manager = ThreadSafeOverwriteManager(self)
+        self._thread_safe_overwrite_manager.conflict_request.connect(
+            self._handle_thread_conflict_request
+        )
+
+    def _handle_thread_conflict_request(self, conflict_info, operation_type):
+        """Main-thread handler: show OverwriteDialog and relay the response."""
+        choice, apply_all = OverwriteDialog.ask_overwrite(
+            conflict_info, operation_type, self._get_main_window()
+        )
+        self._thread_safe_overwrite_manager.provide_response(choice, apply_all)
         
     def get_ps3_processor(self):
         """Get or create a PS3 processor."""
@@ -40,8 +54,8 @@ class ProcessingManager(QObject):
                 self.settings_manager, self.output_window, self._get_main_window()
             )
             processor.set_progress_callback(self.progress_updated.emit)
-            # Share overwrite manager with PS3 processor
-            processor.overwrite_manager = self.overwrite_manager
+            # Share thread-safe overwrite manager with PS3 processor (used by SplitPkgThread)
+            processor.overwrite_manager = self._thread_safe_overwrite_manager
             self.processors['ps3'] = processor
         return self.processors['ps3']
     
@@ -461,7 +475,7 @@ class ProcessingManager(QObject):
         self.output_window.append(f"({queue_position}) Unzipping {base_name}.zip...")
         self.progress_updated.emit(0)
         
-        self.unzip_runner = UnzipRunner(zip_path, output_path, self.overwrite_manager)
+        self.unzip_runner = UnzipRunner(zip_path, output_path, self._thread_safe_overwrite_manager)
         # Connect progress signal to ensure unzip progress shows in progress bar
         self.unzip_runner.progress_signal.connect(self.progress_updated.emit)
         self.unzip_runner.unzip_paused_signal.connect(self.processing_paused.emit)
@@ -1061,33 +1075,15 @@ class ProcessingManager(QObject):
     def reset_overwrite_choices(self):
         """Reset overwrite manager choices for new processing session."""
         self.overwrite_manager.reset()
+        self._thread_safe_overwrite_manager.reset()
     
     def _generate_unique_filename(self, file_path):
         """Generate a unique filename by adding a suffix."""
-        directory = os.path.dirname(file_path)
-        filename = os.path.basename(file_path)
-        name, ext = os.path.splitext(filename)
-        
-        counter = 1
-        while True:
-            new_filename = f"{name} ({counter}){ext}"
-            new_path = os.path.join(directory, new_filename)
-            if not os.path.exists(new_path):
-                return new_path
-            counter += 1
+        return generate_unique_filename(file_path)
     
     def _generate_unique_dirname(self, dir_path):
         """Generate a unique directory name by adding a suffix."""
-        parent_dir = os.path.dirname(dir_path)
-        dir_name = os.path.basename(dir_path)
-        
-        counter = 1
-        while True:
-            new_dir_name = f"{dir_name} ({counter})"
-            new_path = os.path.join(parent_dir, new_dir_name)
-            if not os.path.exists(new_path):
-                return new_path
-            counter += 1
+        return generate_unique_dirname(dir_path)
     
     def _get_main_window(self):
         """Get the main window for dialog parenting."""

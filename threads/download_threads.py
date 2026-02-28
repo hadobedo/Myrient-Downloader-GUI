@@ -12,12 +12,14 @@ from urllib.parse import unquote
 from bs4 import BeautifulSoup
 from PyQt5.QtCore import QThread, pyqtSignal, QEventLoop
 
+from core.utils import format_file_size
+
 
 class GetSoftwareListThread(QThread):
     signal = pyqtSignal('PyQt_PyObject')
 
     def __init__(self, url, json_file, fetch_sizes=True):
-        QThread.__init__(self)
+        super().__init__()
         self.url = url
         # Ensure json file is in config directory
         self.json_file = os.path.join("config", json_file)
@@ -168,9 +170,8 @@ class GetSoftwareListThread(QThread):
             from core.download_manager import DownloadManager
             import time
             
-            # Try to get alternative domain first, then build download URL
-            effective_base_url = DownloadManager.try_alternative_domains(self.url, filename)
-            download_url = DownloadManager.build_download_url(effective_base_url, filename)
+            # Build download URL directly (Myrient handles redirects)
+            download_url = DownloadManager.build_download_url(self.url, filename)
             
             # Add a small delay to avoid overwhelming the server
             time.sleep(0.1)
@@ -196,14 +197,7 @@ class GetSoftwareListThread(QThread):
         
     def _format_file_size(self, size_bytes):
         """Format file size for display."""
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.1f} GB"
+        return format_file_size(size_bytes)
     
     def _parse_directory_listing_with_sizes(self, soup):
         """Parse directory listing HTML to extract filenames and sizes directly."""
@@ -351,12 +345,13 @@ class DownloadThread(QThread):
     progress_signal = pyqtSignal(int)
     download_complete_signal = pyqtSignal()
     download_paused_signal = pyqtSignal()
+    download_error_signal = pyqtSignal(str)  # Distinct from completion
     speed_signal = pyqtSignal(str)
     eta_signal = pyqtSignal(str)
-    size_signal = pyqtSignal(str)  # Add size signal
+    size_signal = pyqtSignal(str)
     
-    def __init__(self, url, filename, retries=50):
-        QThread.__init__(self)
+    def __init__(self, url, filename, retries=5):
+        super().__init__()
         self.url = url
         self.filename = filename
         self.retries = retries
@@ -376,30 +371,32 @@ class DownloadThread(QThread):
         self.last_emitted_speed = 0
         self.last_emitted_eta = 0
         
-        # Dynamic chunking parameters
-        self.initial_chunk_size = 262144  # Start with 256KB chunks
-        self.min_chunk_size = 65536      # 64KB minimum
-        self.max_chunk_size = 4194304    # 4MB maximum
-        self.current_chunk_size = self.initial_chunk_size
-        self.chunk_adjust_threshold = 5  # Number of chunks before adjustment
-        self.chunk_counter = 0
-        self.last_adjust_time = 0
-        self.adjust_interval = 2.0       # Seconds between adjustments
-        
         # Connection parameters
-        self.tcp_nodelay = True          # Disable Nagle's algorithm for better responsiveness
         self.read_timeout = 30.0         # Read timeout in seconds
 
     async def download(self):
-        # Create pause event in the async context
+        """Download a file asynchronously with retry, pause/resume, and progress reporting.
+
+        Uses aiohttp to stream the file in 1MB chunks.  Supports HTTP Range
+        requests for resuming partially-downloaded files.  Emits Qt signals for
+        progress percentage, speed, ETA, and downloaded/total size.  The method
+        retries up to ``self.retries`` times on transient failures.
+        """
         self.pause_event = asyncio.Event()
         self.pause_event.set()  # Not paused initially
         
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': '*/*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive'
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
+            'Referer': 'https://myrient.erista.me/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
         }
 
         for i in range(self.retries):
@@ -408,13 +405,11 @@ class DownloadThread(QThread):
                     self.existing_file_size = os.path.getsize(self.filename)
                     headers['Range'] = f'bytes={self.existing_file_size}-'
 
-                # Configure client session with optimized parameters
+                # Configure client session with standard browser-like parameters
                 connector = aiohttp.TCPConnector(
-                    force_close=False,          # Keep connections alive
-                    ssl=False,                  # Disable SSL verification for speed
-                    ttl_dns_cache=300,          # Cache DNS for 5 minutes
-                    limit=0,                    # No connection limit
-                    enable_cleanup_closed=True  # Clean up closed connections
+                    force_close=False,
+                    ssl=True,                   # Enable SSL validation to look like a real browser
+                    limit=1,                    # Enforce strictly 1 connection as per guidelines
                 )
                 
                 timeout = aiohttp.ClientTimeout(
@@ -445,7 +440,10 @@ class DownloadThread(QThread):
                             self.last_adjust_time = time.time()
                             self.chunk_counter = 0
                             
-                            while True:
+                            # Use a generous static chunk size instead of the dynamic abusive logic
+                            static_chunk_size = 1024 * 1024  # 1 MB chunks
+                            
+                            async for chunk in response.content.iter_chunked(static_chunk_size):
                                 # Check if we should stop
                                 if not self.running or self._stop_requested:
                                     return
@@ -462,12 +460,6 @@ class DownloadThread(QThread):
                                     self.last_update_time = time.time()
                                     self.download_chunks.clear()  # Clear old chunks after pause
                                     self.current_session_downloaded = 0
-                                    self.last_adjust_time = time.time()
-                                
-                                # Read data with dynamic chunk size
-                                chunk = await response.content.read(self.current_chunk_size)
-                                if not chunk:
-                                    break
                                     
                                 # Write the chunk and update counters
                                 file.write(chunk)
@@ -487,13 +479,6 @@ class DownloadThread(QThread):
                                 # Emit file size information
                                 size_str = f"{self.format_size(self.existing_file_size)}/{self.format_size(total_size)}"
                                 self.size_signal.emit(size_str)
-                                
-                                # Dynamically adjust chunk size based on download speed
-                                self.chunk_counter += 1
-                                if self.chunk_counter >= self.chunk_adjust_threshold and (current_time - self.last_adjust_time) >= self.adjust_interval:
-                                    self.adjust_chunk_size()
-                                    self.chunk_counter = 0
-                                    self.last_adjust_time = current_time
 
                                 # Calculate and emit speed and ETA more frequently (0.1s) for "live" feeling
                                 if current_time - self.last_update_time >= 0.1:  # Update UI every 100ms
@@ -521,49 +506,23 @@ class DownloadThread(QThread):
                 break
             except aiohttp.ClientPayloadError:
                 print(f"Download interrupted. Retrying ({i+1}/{self.retries})...")
-                await asyncio.sleep(2 ** i + random.random())  # Exponential backoff
+                await asyncio.sleep(min(2 ** i + random.random(), 60))  # Capped exponential backoff
                 if i == self.retries - 1:  # If this was the last retry
                     raise  # Re-raise the exception
             except asyncio.TimeoutError:
                 print(f"Download timed out. Retrying ({i+1}/{self.retries})...")
-                # Reduce chunk size upon timeout to improve stability
-                self.current_chunk_size = max(self.current_chunk_size // 2, self.min_chunk_size)
-                await asyncio.sleep(2 ** i + random.random())  # Exponential backoff
+                # Keep chunk size static on errors instead of halving
+                await asyncio.sleep(min(2 ** i + random.random(), 60))  # Capped exponential backoff
                 if i == self.retries - 1:  # If this was the last retry
                     raise  # Re-raise the exception
             except Exception as e:
                 print(f"Download error: {str(e)}. Retrying ({i+1}/{self.retries})...")
-                # Reduce chunk size on general errors too
-                self.current_chunk_size = max(self.current_chunk_size // 2, self.min_chunk_size)
-                await asyncio.sleep(2 ** i + random.random())  # Exponential backoff
+                # Keep chunk size static on errors instead of halving
+                await asyncio.sleep(min(2 ** i + random.random(), 60))  # Capped exponential backoff
                 if i == self.retries - 1:
                     raise
 
-    def adjust_chunk_size(self):
-        """Dynamically adjust chunk size based on download speed"""
-        if not self.download_chunks:
-            return
-        
-        # Calculate recent download speed
-        speed = self.calculate_speed()
-        
-        # Don't adjust if speed is too low (likely unstable connection)
-        if speed < 50000:  # Less than 50 KB/s
-            return
-        
-        # Calculate optimal chunk size - approximately the amount downloaded in 1 second
-        optimal_chunk = min(max(int(speed), self.min_chunk_size), self.max_chunk_size)
-        
-        # Gradually adjust chunk size (don't change too drastically)
-        if optimal_chunk > self.current_chunk_size:
-            # Increase by 25% if optimal is higher
-            self.current_chunk_size = min(int(self.current_chunk_size * 1.25), optimal_chunk)
-        elif optimal_chunk < self.current_chunk_size * 0.75:
-            # Decrease if optimal is significantly lower (25% lower)
-            self.current_chunk_size = max(int(self.current_chunk_size * 0.75), optimal_chunk)
-            
-        # Ensure chunk size stays within bounds
-        self.current_chunk_size = min(max(self.current_chunk_size, self.min_chunk_size), self.max_chunk_size)
+    # adjust_chunk_size is removed since we use static chunk sizing
 
     def calculate_speed(self):
         """Calculate current download speed in bytes per second using sliding window."""
@@ -631,29 +590,17 @@ class DownloadThread(QThread):
             else:
                 return f"{hours} hours {minutes} minutes remaining"
     
-    def format_file_size(self, size_bytes):
-        """Format file size in a human-readable format."""
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.2f} GB"
-    
     def format_size(self, size_in_bytes):
         """Format file size with appropriate units."""
-        if size_in_bytes < 1024:
-            return f"{size_in_bytes} B"
-        elif size_in_bytes < 1024 * 1024:
-            return f"{size_in_bytes/1024:.1f} KB"
-        elif size_in_bytes < 1024 * 1024 * 1024:
-            return f"{size_in_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_in_bytes/(1024*1024*1024):.1f} GB"
+        return format_file_size(size_in_bytes)
 
     def run(self):
+        """Run the download in an asyncio event loop.
+
+        Emits ``download_complete_signal`` on success, or
+        ``download_error_signal(str)`` on failure.  Errors must NOT be
+        treated as completions — the caller should handle them separately.
+        """
         try:
             asyncio.run(self.download())
             # Only emit completion if not paused and not stopped
@@ -665,7 +612,7 @@ class DownloadThread(QThread):
         except Exception as e:
             print(f"Download thread error: {e}")
             if self.running and not self._stop_requested:
-                self.download_complete_signal.emit()
+                self.download_error_signal.emit(str(e))
 
     def stop(self):
         self.running = False

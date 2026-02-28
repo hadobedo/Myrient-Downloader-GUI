@@ -236,6 +236,9 @@ def style_dialog_for_theme(dialog):
 def validate_startup_prerequisites():
     """Validate startup prerequisites using the new settings-based system."""
     try:
+        # Use a shared SettingsManager instance — callers (main()) should pass
+        # one if they need it later, but for a lightweight startup check the
+        # instance created here is inexpensive and short-lived.
         from core.settings import SettingsManager
         settings_manager = SettingsManager()
         return settings_manager.validate_startup_prerequisites()

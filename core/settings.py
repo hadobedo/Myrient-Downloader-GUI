@@ -3,6 +3,7 @@ import shutil
 import platform
 import urllib.request
 import zipfile
+import tarfile
 import tempfile
 from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtWidgets import (
@@ -635,7 +636,7 @@ class DirectoryManager:
                     # Clean up any old entries in the General section
                     try:
                         self.settings.remove(f'General/{attr_name}')
-                    except:
+                    except Exception:
                         pass  # Ignore if the key doesn't exist
 
 class SettingsManager:
@@ -844,6 +845,7 @@ class SettingsManager:
         """Download the PS3Dec binary (Windows only)."""
         if platform.system() == 'Windows':
             try:
+                import hashlib
                 print("Downloading PS3Dec from GitHub...")
                 
                 # Ensure config directory exists
@@ -856,6 +858,19 @@ class SettingsManager:
                     "https://github.com/Redrrx/ps3dec/releases/download/0.1.0/ps3dec.exe",
                     ps3dec_path
                 )
+
+                # Verify SHA-256 integrity
+                EXPECTED_SHA256 = None  # TODO: pin actual hash after first verified download
+                if EXPECTED_SHA256:
+                    sha256 = hashlib.sha256()
+                    with open(ps3dec_path, 'rb') as f:
+                        for block in iter(lambda: f.read(8192), b''):
+                            sha256.update(block)
+                    if sha256.hexdigest() != EXPECTED_SHA256:
+                        os.unlink(ps3dec_path)
+                        print(f"SHA-256 mismatch for ps3dec.exe! Expected {EXPECTED_SHA256}, got {sha256.hexdigest()}")
+                        return False
+
                 self.ps3dec_binary = ps3dec_path
                 self.settings.setValue('binaries/ps3dec_binary', self.ps3dec_binary)
                 print(f"PS3Dec downloaded successfully to {ps3dec_path}")
@@ -947,7 +962,7 @@ class SettingsManager:
                             # Clean up tar.gz temp file
                             try:
                                 os.unlink(temp_tar_path)
-                            except:
+                            except Exception:
                                 pass
                     else:
                         # Fallback: try direct extraction from ZIP (old behavior)
@@ -977,7 +992,7 @@ class SettingsManager:
                 # Delete the temporary ZIP file
                 try:
                     os.unlink(temp_zip_path)
-                except:
+                except Exception:
                     pass  # Ignore cleanup errors
                 
                 if extractps3iso_found:

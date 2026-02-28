@@ -5,6 +5,8 @@ from PyQt5.QtCore import Qt, QObject, pyqtSignal, QSize
 from PyQt5.QtWidgets import QTreeWidgetItem, QListWidgetItem
 from PyQt5.QtGui import QFont, QBrush, QColor
 
+from core.utils import format_file_size
+
 
 class QueueManager(QObject):
     """Manages download queue operations separate from GUI."""
@@ -270,9 +272,7 @@ class QueueManager(QObject):
             if not url:
                 return ""
             
-            # Try to get alternative domain first, then build download URL
-            effective_base_url = DownloadManager.try_alternative_domains(url, filename)
-            download_url = DownloadManager.build_download_url(effective_base_url, filename)
+            download_url = DownloadManager.build_download_url(url, filename)
             
             # Get remote file size
             size_bytes = DownloadManager.get_remote_file_size(download_url)
@@ -334,11 +334,4 @@ class QueueManager(QObject):
     
     def _format_file_size(self, size_bytes):
         """Format file size for display."""
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes/1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes/(1024*1024):.1f} MB"
-        else:
-            return f"{size_bytes/(1024*1024*1024):.1f} GB"
+        return format_file_size(size_bytes)
