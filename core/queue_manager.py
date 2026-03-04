@@ -4,8 +4,8 @@ from PyQt5.QtCore import Qt, QObject, pyqtSignal, QSize
 from PyQt5.QtWidgets import QTreeWidgetItem, QListWidgetItem
 from PyQt5.QtGui import QFont, QBrush, QColor
 
+from core.database import AppDatabase
 from core.utils import format_file_size
-
 
 class QueueManager(QObject):
     """Manages download queue operations separate from GUI."""
@@ -17,10 +17,11 @@ class QueueManager(QObject):
         self.queue_items = []
         self.data_dir = os.path.join("MyrientDownloads", "data")
         self.queue_file = os.path.join(self.data_dir, "queue.txt")
+        self.queue_item_class = None
+        self.queue_item_parent = None
     
     def load_queue(self):
         """Load the download queue from database."""
-        from core.database import AppDatabase
         try:
             db = AppDatabase()
             self.queue_items = db.get_queue()
@@ -42,13 +43,25 @@ class QueueManager(QObject):
             queue_items.append(item_data)
         
         try:
-            from core.database import AppDatabase
             db = AppDatabase()
             db.save_queue(queue_items)
         except Exception as e:
             print(f"Error saving queue to database: {e}")
         
         self.queue_items = queue_items
+        self.queue_updated.emit()
+
+    def pop_front_queue_item(self):
+        """Remove the first queue item from database."""
+        try:
+            db = AppDatabase()
+            db.pop_front_queue_item()
+        except Exception as e:
+            print(f"Error popping front queue item: {e}")
+            return
+
+        if self.queue_items:
+            self.queue_items = self.queue_items[1:]
         self.queue_updated.emit()
     
     def add_to_queue(self, item_data, queue_list_widget, platforms):
@@ -73,26 +86,37 @@ class QueueManager(QObject):
             return True
         return False
     
-    def add_formatted_item_to_queue(self, queue_data, queue_tree_widget):
-        """Add an item to the queue list with file size column."""
-        # Try to import QueueTreeWidgetItem, fallback to standard QTreeWidgetItem
+    def _get_queue_tree_parent(self, queue_tree_widget):
+        """Get and cache QueueTreeWidgetItem parent."""
+        if self.queue_item_class is not None:
+            return
+
         try:
             from gui.main_window import QueueTreeWidgetItem
-            # Get the main window instance from the queue tree widget
-            main_window = None
-            parent = queue_tree_widget.parent()
-            while parent:
-                if hasattr(parent, 'move_queue_item_up_inline'):
-                    main_window = parent
-                    break
-                parent = parent.parent()
-            
-            if main_window:
-                tree_item = QueueTreeWidgetItem(['', '', ''], main_window)
-            else:
-                tree_item = QTreeWidgetItem()
+            self.queue_item_class = QueueTreeWidgetItem
         except ImportError:
-            tree_item = QTreeWidgetItem()
+            self.queue_item_class = None
+            self.queue_item_parent = None
+            return
+
+        parent = queue_tree_widget.parent()
+        while parent:
+            if hasattr(parent, 'move_queue_item_up_inline'):
+                self.queue_item_parent = parent
+                return
+            parent = parent.parent()
+        self.queue_item_parent = None
+
+    def _create_queue_item(self, queue_tree_widget):
+        """Create queue item by type."""
+        self._get_queue_tree_parent(queue_tree_widget)
+        if self.queue_item_class and self.queue_item_parent:
+            return self.queue_item_class(['', '', ''], self.queue_item_parent)
+        return QTreeWidgetItem()
+
+    def add_formatted_item_to_queue(self, queue_data, queue_tree_widget, create_buttons=True, fetch_missing_size=True):
+        # Add formatted item to the queue list
+        tree_item = self._create_queue_item(queue_tree_widget)
         
         # Support both new format (dict) and old format (string)
         if isinstance(queue_data, dict):
@@ -124,7 +148,7 @@ class QueueManager(QObject):
             tree_item.setText(0, clean_text)
             
             # Set size in second column - try to fetch if empty
-            if not size:
+            if not size and fetch_missing_size:
                 size = self._fetch_file_size_for_item(item_text)
             tree_item.setText(1, size)
             tree_item.setTextAlignment(1, Qt.AlignRight)  # Right-align size
@@ -137,7 +161,7 @@ class QueueManager(QObject):
         queue_tree_widget.addTopLevelItem(tree_item)
         
         # Create inline buttons if this is a QueueTreeWidgetItem
-        if hasattr(tree_item, 'create_buttons'):
+        if create_buttons and hasattr(tree_item, 'create_buttons'):
             tree_item.create_buttons(queue_tree_widget)
         
         # Ensure columns are properly sized after adding item
@@ -151,6 +175,25 @@ class QueueManager(QObject):
                 pass  # Let the resize modes handle it
         
         return tree_item
+
+    def add_formatted_items_to_queue(self, queue_items, queue_tree_widget, create_buttons=False, fetch_missing_size=False):
+        """Add queue items, with UI updates paused and resumed."""
+        if not queue_items:
+            return
+
+        queue_tree_widget.setUpdatesEnabled(False)
+        queue_tree_widget.blockSignals(True)
+        try:
+            for queue_data in queue_items:
+                self.add_formatted_item_to_queue(
+                    queue_data,
+                    queue_tree_widget,
+                    create_buttons=create_buttons,
+                    fetch_missing_size=fetch_missing_size
+                )
+        finally:
+            queue_tree_widget.blockSignals(False)
+            queue_tree_widget.setUpdatesEnabled(True)
     
     def remove_from_queue(self, selected_items, queue_tree_widget):
         """Remove selected items from the download queue."""
