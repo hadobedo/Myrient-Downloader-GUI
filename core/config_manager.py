@@ -36,19 +36,72 @@ psp:
   tab_name: "PSP (ISO)"
   url: "https://myrient.erista.me/files/Redump/Sony%20-%20PlayStation%20Portable/"
 
+dreamcast:
+  tab_name: "Dreamcast (ISO)"
+  url: "https://myrient.erista.me/files/Redump/Sega%20-%20Dreamcast/"
+
+dreamcastgdi:
+  tab_name: "Dreamcast (GDI)"
+  url: "https://myrient.erista.me/files/Redump/Sega%20-%20Dreamcast%20-%20GDI%20Files/"
+
+ds:
+  tab_name: "DS (DS)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%20DS%20%28Decrypted%29/"
+
+gameboy:
+  tab_name: "GameBoy (GB)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy/"
+
+gameboycolor:
+  tab_name: "GameBoy Color (GBC)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Color/"
+
+gameboyadv:
+  tab_name: "GameBoy Advance (GBA)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Game%20Boy%20Advance/"
+
 gamecube:
   tab_name: "GameCube (RVZ)"
   url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20GameCube%20-%20NKit%20RVZ%20[zstd-19-128k]/"
 
+n64:
+  tab_name: "N64 (Z64)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%2064%20%28BigEndian%29/"
+
+n64v:
+  tab_name: "N64 (V64)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Nintendo%2064%20%28ByteSwapped%29/"
+
+snes:
+  tab_name: "SNES (SFC)"
+  url: "https://myrient.erista.me/files/No-Intro/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/"
+
 wii:
   tab_name: "Wii (RVZ)"
   url: "https://myrient.erista.me/files/Redump/Nintendo%20-%20Wii%20-%20NKit%20RVZ%20[zstd-19-128k]/"
+
+xbox:
+  tab_name: "Xbox (ISO)"
+  url: "https://myrient.erista.me/files/Redump/Microsoft%20-%20Xbox/"
+
+xbox360:
+  tab_name: "Xbox 360 (ISO)"
+  url: "https://myrient.erista.me/files/Redump/Microsoft%20-%20Xbox%20360/"
+
+xbox360tu:
+  tab_name: "Xbox 360 Title Updates (TU)"
+  url: "https://myrient.erista.me/files/No-Intro/Unofficial%20-%20Microsoft%20-%20Xbox%20360%20%28Title%20Updates%29/"
+
+xbox360digital:
+  tab_name: "Xbox 360 Digital (XBLA)"
+  url: "https://myrient.erista.me/files/No-Intro/Microsoft%20-%20Xbox%20360%20%28Digital%29/"
 """
     
     def __init__(self, config_file=None):
         self.config_file = config_file or self.DEFAULT_CONFIG_PATH
         self.config = {}
-        self.ensure_config_exists()
+        # Ensure latest config sources
+        self.generate_default_config()
         self.load_config()
     
     def load_config(self):
@@ -74,22 +127,18 @@ wii:
             sys.stderr.flush()
     
     def ensure_config_exists(self):
-        """Ensure the configuration file exists, downloading it from GitHub if needed."""
-        # Check in working directory
-        config_filename = os.path.basename(self.config_file)
-        if os.path.exists(config_filename):
-            self.config_file = config_filename
-            return
-        
+        """Ensure the configuration file exists."""
         # Check in config directory
         if os.path.exists(self.config_file):
             return
         
         # Neither location has the config, generate default
         sys.stderr.write(f"Configuration file not found at {self.config_file}\n")
+        self.generate_default_config()
+
+    def generate_default_config(self):
         sys.stderr.write("Generating default myrient_urls.yaml configuration offline.\n")
         sys.stderr.flush()
-        
         try:
             # Create config directory if it doesn't exist
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
