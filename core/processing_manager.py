@@ -522,7 +522,8 @@ class ProcessingManager(QObject):
             return
             
         # Download dkey zip
-        dkey_url = f"{dkey_url}/{base_name}.zip"
+        from core.download_manager import DownloadManager
+        dkey_url = DownloadManager.build_download_url(dkey_url, f"{base_name}.zip")
         download_thread = DownloadThread(dkey_url, dkey_zip)
         download_thread.progress_signal.connect(self.progress_updated.emit)
         

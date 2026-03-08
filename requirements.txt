@@ -5,3 +5,4 @@ PyQt5>=5.15.2
 requests>=2.25.1
 PyYAML>=6.0
 pycdlib>=1.10.0
+brotli>=1.0.9
