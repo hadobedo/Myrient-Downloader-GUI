@@ -61,6 +61,14 @@ class AppDatabase:
                 )
             
             conn.commit()
+
+    def pop_front_queue_item(self):
+        """Pop front queue item."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM queue WHERE position = 0')
+            cursor.execute('UPDATE queue SET position = position - 1 WHERE position > 0')
+            conn.commit()
             
     # List Cache Operations
     def get_list_cache(self, platform_id):

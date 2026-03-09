@@ -85,11 +85,10 @@ class AppController(QObject):
         platform_name = current_platform.upper()
         
         for item in selected_items:
-            item_text = item.text()
-            formatted_text = f"({platform_name}) {item_text}"
+            formatted_text = f"({platform_name}) {item}"
             
             # Get file size from the stored JSON data
-            file_size = self._get_file_size_from_cache(current_platform, item_text)
+            file_size = self._get_file_size_from_cache(current_platform, item)
             
             # Create item data with size
             item_data = {
@@ -266,7 +265,7 @@ class AppController(QObject):
                     
                     # Remove the skipped item to avoid infinite loop
                     queue_list_widget.takeTopLevelItem(0)
-                    self.save_queue(queue_list_widget)
+                    self.queue_manager.pop_front_queue_item()
                     continue
                 
                 # Reset skip counter when we find a processable item
@@ -294,8 +293,7 @@ class AppController(QObject):
                 # Remove item from queue if not paused
                 if not self.is_paused:
                     queue_list_widget.takeTopLevelItem(0)
-                    # Save queue immediately after removing completed item
-                    self.save_queue(queue_list_widget)
+                    self.queue_manager.pop_front_queue_item()
                 
                 is_resuming_session = False
         except RuntimeError as e:
@@ -412,10 +410,17 @@ class AppController(QObject):
                         self._update_queue_item_status(paused_item_widget, "PAUSED", QColor(255, 215, 0), "(PAUSED)")
 
                         # Add remaining items from the original loaded queue
+                        items = []
                         for other_item_data in loaded_queue_items_from_file:
                             other_item_name = other_item_data.get('name') if isinstance(other_item_data, dict) else other_item_data
                             if other_item_name != item_name_from_storage:
-                                self.queue_manager.add_formatted_item_to_queue(other_item_data, queue_list_widget)
+                                items.append(other_item_data)
+                        self.queue_manager.add_formatted_items_to_queue(
+                            items,
+                            queue_list_widget,
+                            create_buttons=False,
+                            fetch_missing_size=False
+                        )
                         
                         # Set AppController state for this paused item
                         self.current_item = item_name_from_storage
@@ -444,8 +449,12 @@ class AppController(QObject):
         if not pause_state:
             # No physical file and no saved state, so just load the queue normally if it wasn't already
             if queue_list_widget.topLevelItemCount() == 0: # Check if queue is empty
-                 for item_data_s in loaded_queue_items_from_file:
-                    self.queue_manager.add_formatted_item_to_queue(item_data_s, queue_list_widget)
+                self.queue_manager.add_formatted_items_to_queue(
+                    loaded_queue_items_from_file,
+                    queue_list_widget,
+                    create_buttons=False,
+                    fetch_missing_size=False
+                )
             return False
             
         # Clear the current queue if we are restoring from StateManager
@@ -456,11 +465,18 @@ class AppController(QObject):
         self._update_queue_item_status(paused_item, "PAUSED", QColor(255, 215, 0), "(PAUSED)")
         
         if 'remaining_queue' in pause_state and isinstance(pause_state['remaining_queue'], list):
+            remaining_items = []
             for item_data in pause_state['remaining_queue']:
                 item_text = item_data['name'] if isinstance(item_data, dict) else item_data
                 current_text = current_item_data['name'] if isinstance(current_item_data, dict) else current_item_data
                 if item_text != current_text:
-                    self.queue_manager.add_formatted_item_to_queue(item_data, queue_list_widget)
+                    remaining_items.append(item_data)
+            self.queue_manager.add_formatted_items_to_queue(
+                remaining_items,
+                queue_list_widget,
+                create_buttons=False,
+                fetch_missing_size=False
+            )
         
         if isinstance(current_item_data, dict):
             self.current_item = current_item_data['name']
